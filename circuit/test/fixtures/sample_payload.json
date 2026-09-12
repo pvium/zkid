@@ -1,0 +1,9 @@
+{
+  "cr": "1768160025",
+  "linked_accounts": "[{\"id\":\"f7z77y9weg70rk0pb0t23pv3\",\"type\":\"wallet\",\"address\":\"0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98\",\"chain_type\":\"ethereum\",\"wallet_client_type\":\"privy\",\"lv\":1768160022},{\"type\":\"email\",\"address\":\"test-9988@privy.io\",\"lv\":1789240093},{\"id\":\"aikp060nbilj79p1qgb74cpi\",\"type\":\"wallet\",\"address\":\"EXnVUEeELHiYynvjoQ9YhgxfMSDJC6tJm7VkFQY2b8Wj\",\"chain_type\":\"solana\",\"wallet_client_type\":\"privy\",\"lv\":1771038735},{\"id\":\"k1scwb7toh73xvdvswmkc5xv\",\"type\":\"wallet\",\"address\":\"0x899BA183F2c55BF9C627D9Af2984fbdED2E64311\",\"chain_type\":\"ethereum\",\"wallet_client_type\":\"privy\",\"lv\":1775145514},{\"id\":\"fz93zfsl7kpez8ckibcersij\",\"type\":\"wallet\",\"address\":\"0xA7CabE96d97044f74Be883d7cf33DD63f574c84e\",\"chain_type\":\"ethereum\",\"wallet_client_type\":\"privy\",\"lv\":1775145555},{\"type\":\"github_oauth\",\"subject\":\"33419641\",\"username\":\"dephizee\",\"lv\":1786560835},{\"id\":\"nl18n4dv8yvx4a4f8szc8dct\",\"type\":\"wallet\",\"address\":\"0xf1707D8CB99339d3B7Bea0b1A2ac3c9C01B8Ab3d\",\"chain_type\":\"ethereum\",\"wallet_client_type\":\"privy\",\"lv\":1786634679},{\"id\":\"whhexzfqzseupaf0jgc99jfg\",\"type\":\"wallet\",\"address\":\"0xdA90b3C11F5AA8698F5D9356f29541D46E32840d\",\"chain_type\":\"ethereum\",\"wallet_client_type\":\"privy\",\"lv\":1786634702}]",
+  "iss": "privy.io",
+  "iat": 1789240094,
+  "aud": "cmhc6t92u001tju0cxkxg34on",
+  "sub": "did:privy:cmka4tr7q00a4jr0daw3glw5u",
+  "exp": 1789276094
+}

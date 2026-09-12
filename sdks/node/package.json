@@ -1,0 +1,39 @@
+{
+  "name": "@pvium/zkid",
+  "version": "0.1.0",
+  "description": "Verify Pvium identity attestations (Noir/UltraHonk) off-chain, plus the Solidity sources to verify them on-chain",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./contracts/*": "./contracts/*"
+  },
+  "files": [
+    "dist",
+    "contracts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "sh scripts/sync-contracts.sh && node scripts/embed-vk.mjs && tsc -p tsconfig.json",
+    "test": "yarn build && node --test --import tsx test/*.test.ts",
+    "sync": "sh scripts/sync-circuit.sh",
+    "prepublishOnly": "yarn test"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "5.0.0-nightly.20260522"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

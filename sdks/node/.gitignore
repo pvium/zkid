@@ -1,0 +1,5 @@
+node_modules/
+dist/
+src/vk.ts
+*.tgz
+contracts/
