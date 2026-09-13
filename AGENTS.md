@@ -1,6 +1,6 @@
 # Agent instructions for `circuits/`
 
-Pvium zero-knowledge identity proofs: Noir circuit, TS and Go provers, Solidity verifier.
+Pvium zero-knowledge identity proofs: Noir circuit, attestation prover service, Node SDK, Solidity verifier.
 
 ## Package manager
 
@@ -26,6 +26,7 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
 | `circuit/` | Noir circuit (`src/`), witness generator (`scripts/`), e2e test + sample token/keys (`test/`) |
 | `contracts/` | Hardhat 2 + ethers v6 project: generated Honk verifier, `PviumIdentity` (dev API), `PviumHash`, `IPviumIdentity` in `src/` |
 | `sdks/node/` | npm package `@pvium/zk-verifier` (bb.js verifier + claim decoding). `sdks/python`, `sdks/go` later |
+| `http-prover/` | Attestation service (Express 5, `--env-file=.env`, noir_js solve, native `bb` prove). `yarn sync` copies circuit artifacts |
 
 ## Workflow rules
 
@@ -33,8 +34,17 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
   Never hand-edit it. After any circuit change: `nargo compile`, `nargo execute`, `bb prove`,
   then `yarn fixtures` in `contracts/` to refresh test fixtures and the verifier, and `yarn sync`
   in `sdks/node/` to refresh its bundled vk and fixtures.
+- **Circuit versioning**: `circuit/version.json` names the current build (`circuitVersion`, vk sha256).
+  Bump `circuitVersion` whenever the compiled circuit changes, then sync all consumers (`yarn fixtures`
+  in contracts, `yarn sync` in sdks/node and http-prover). Each consumer is pinned to one version:
+  the SDK release embeds one vk and rejects other versions by name; the prover serves one version and
+  echoes it in every attestation; `PviumIdentity` is deployed once per version. Old attestations stay
+  valid against their own version's SDK release and contract; they are not regenerated in bulk.
 - The Solidity sources in `contracts/src` are the source of truth; `sdks/node/scripts/sync-contracts.sh`
   copies them into the npm package at build time (gitignored there). Never edit `sdks/node/contracts/`.
+- `http-prover/src/witness.ts` is a port of `circuit/scripts/gen_prover.py`; `http-prover/test/witness.test.ts`
+  diffs their output byte for byte. Change both together. `@noir-lang/noir_js` in `http-prover/` is pinned
+  to the nargo version (`1.0.0-beta.22`).
 - Hash/normalisation rules must stay identical in four places: `circuit/src/main.nr` + `identity.nr`,
   `circuit/scripts/gen_prover.py`, `contracts/src/PviumHash.sol`, `sdks/node/src/identity.ts`.
 - `@aztec/bb.js` in `sdks/node` must be pinned to the same version as the installed `bb`

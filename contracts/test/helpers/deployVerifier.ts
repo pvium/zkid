@@ -20,8 +20,8 @@ export async function deployVerifier() {
 }
 
 /** Deploys PviumIdentity bound to a verifier and a registered signer key. */
-export async function deployIdentityProof(verifierAddress: string, signerX: bigint, signerY: bigint) {
-  const proof = await ethers.deployContract('PviumIdentity', [verifierAddress, signerX, signerY]);
+export async function deployIdentityProof(verifierAddress: string, signerX: bigint, signerY: bigint, circuitVersion = 1) {
+  const proof = await ethers.deployContract('PviumIdentity', [verifierAddress, circuitVersion, signerX, signerY]);
   await proof.waitForDeployment();
   return proof;
 }

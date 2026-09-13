@@ -1,0 +1,27 @@
+{
+  "name": "@pvium/zk-prover",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pvium attestation service: builds the witness, solves the circuit and proves it",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file=.env dist/server.js",
+    "dev": "node --env-file=.env --import tsx src/server.ts",
+    "test": "yarn build && node --test --import tsx test/*.test.ts",
+    "sync": "sh scripts/sync-circuit.sh"
+  },
+  "dependencies": {
+    "@noir-lang/noir_js": "1.0.0-beta.22",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@pvium/zk-verifier": "link:../sdks/node",
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": { "node": ">=20.6" }
+}

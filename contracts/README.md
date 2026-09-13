@@ -15,9 +15,11 @@ yarn fixtures   # after re-proving in ../circuit: refresh test fixtures + regene
   `bb write_solidity_verifier`. **Regenerate it whenever the circuit changes**; do not edit by hand.
   It is split into `HonkVerifier` plus two external libraries (`RelationsLib`, `ZKTranscriptLib`)
   that must be deployed first and linked; `test/helpers/deployVerifier.ts` does this.
-- `src/PviumIdentity.sol` — the contract Pvium deploys per chain. Its constructor takes the Honk
-  verifier and the signer's raw P-256 public key `(x, y)` (Privy's app verification key), checks
-  the point is on the curve, and stores it. Developers call it through `IPviumIdentity`:
+- `src/PviumIdentity.sol` — the contract Pvium deploys per chain **and per circuit version**. Its
+  constructor takes the Honk verifier, the circuit version (`circuit/version.json`), and the
+  signer's raw P-256 public key `(x, y)` (Privy's app verification key), checks the point is on
+  the curve, and stores them. `circuitVersion()` lets a caller confirm they hold the right
+  deployment for an attestation's stated version. Developers call it through `IPviumIdentity`:
   - `verifyIdentity(proof, publicInputs, identityType, identityValue, address wallet) → issuedAt`
   - `verifyIdentityNonEvm(…, string wallet)` for base58 / other-chain wallets
   - `verifyIdentityHashes(…, bytes32 identityHash, bytes32 walletHash)` when the raw identity must

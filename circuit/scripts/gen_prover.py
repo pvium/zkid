@@ -200,9 +200,7 @@ def main():
         wallet = locate_account(payload, la_value_start, la_end, "wallet", wkey, wv) + (len(wv),)
 
     iat_idx = find_top_level(payload, in_string, b'"iat":')
-    exp_idx = find_top_level(payload, in_string, b'"exp":')
     iat = int(payload[iat_idx + 6:iat_idx + 16])
-    exp = int(payload[exp_idx + 6:exp_idx + 16])
 
     padded = signing + b"\x00" * (MAX_SIGNING_LEN - len(signing))
     lines = [
@@ -213,7 +211,6 @@ def main():
         f"signer_y = [{', '.join(str(b) for b in signer_y)}]",
         f'payload_b64_start = "{len(header_b64) + 1}"',
         f'iat_idx = "{iat_idx}"',
-        f'exp_idx = "{exp_idx}"',
         f'linked_accounts_idx = "{la_idx}"',
         f'acct_start = "{acct_start}"',
         f'acct_end = "{acct_end}"',
@@ -244,7 +241,6 @@ def main():
     print(f"  signer_y          = 0x{signer_y.hex()}")
     print(f"  signer_y_hi/lo    = 0x{yhi:032x} / 0x{ylo:032x}")
     print(f"  iat               = {iat}")
-    print(f"  exp               = {exp}")
     print(f"  identity_hash     = 0x{ih.hex()}")
     print(f"  identity_hash_hi/lo = 0x{ihi:032x} / 0x{ilo:032x}")
     wh = identity_hash(TYPES["wallet"][0], a.wallet, False) if a.wallet else bytes(32)

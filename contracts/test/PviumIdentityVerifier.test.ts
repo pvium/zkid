@@ -199,6 +199,15 @@ describe('PviumIdentity', function () {
     expect(await gate.signerX()).to.equal(x);
     expect(await gate.signerY()).to.equal(y);
     expect(await gate.verifier()).to.equal(verifierAddress);
+    expect(await gate.circuitVersion()).to.equal(1n);
+  });
+
+  it('refuses circuit version 0', async () => {
+    const { x, y } = sampleSignerKey();
+    await expect(deployIdentityProof(verifierAddress, x, y, 0)).to.be.revertedWithCustomError(
+      await ethers.getContractFactory('PviumIdentity'),
+      'InvalidCircuitVersion',
+    );
   });
 
   it('refuses to register a point that is not on P-256', async () => {

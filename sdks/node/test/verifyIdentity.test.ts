@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { createPublicKey } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IdentityType, shutdown, verifyIdentity, type Attestation } from '../src/index.js';
+import { CIRCUIT_VERSION, IdentityType, shutdown, verifyIdentity, type Attestation } from '../src/index.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const proof = new Uint8Array(readFileSync(join(fixtures, 'email.proof')));
@@ -26,6 +26,16 @@ test('accepts the enum, base64 transport, and any casing of the identity value',
   const r = await verifyIdentity({ attestation: b64, signer: pem, identityType: IdentityType.Email, identityValue: 'TEST-9988@PRIVY.IO' });
   assert.equal(r.valid, true);
   assert.equal((r as { wallet: string }).wallet, WALLET.toLowerCase());
+});
+
+test('accepts its own circuit version and rejects others by name', async () => {
+  assert.equal(CIRCUIT_VERSION, 1);
+  const same = await verifyIdentity({ attestation: { ...attestation, circuitVersion: 1 }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.equal(same.valid, true);
+  const other = await verifyIdentity({ attestation: { ...attestation, circuitVersion: 2 }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.deepEqual(other, { valid: false, reason: 'attestation is for circuit version 2; this SDK verifies version 1' });
+  const build = await verifyIdentity({ attestation: { ...attestation, vkHash: '0x' + 'ab'.repeat(32) }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.equal(build.valid, false);
 });
 
 test('rejects a wallet the proof does not bind', async () => {

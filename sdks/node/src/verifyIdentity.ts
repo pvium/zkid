@@ -3,6 +3,7 @@ import { resolveIdentityType, type IdentityTypeName } from './identityNames.js';
 import { decodeClaim, type P256PublicKey, type PublicInputs } from './publicInputs.js';
 import { parseP256PublicKeyPem } from './signer.js';
 import { verifyProof } from './verify.js';
+import { CIRCUIT_VERSION, VK_SHA256 } from './vk.js';
 
 /** What Pvium's resolution API returns for an identity: the proof plus the address it binds. */
 export interface Attestation {
@@ -12,6 +13,9 @@ export interface Attestation {
   publicInputs: PublicInputs | string;
   /** The wallet address the proof binds to the identity, exactly as linked in Privy. */
   wallet: string;
+  /** Circuit version that produced the proof, as reported by the prover. Checked when present. */
+  circuitVersion?: number;
+  vkHash?: string;
 }
 
 /**
@@ -50,6 +54,13 @@ export async function verifyIdentity(input: VerifyIdentityInput): Promise<Verify
     return { valid: false, reason: (e as Error).message };
   }
 
+  const att = input.attestation;
+  if (att.circuitVersion !== undefined && att.circuitVersion !== CIRCUIT_VERSION) {
+    return { valid: false, reason: `attestation is for circuit version ${att.circuitVersion}; this SDK verifies version ${CIRCUIT_VERSION}` };
+  }
+  if (att.vkHash !== undefined && att.vkHash.toLowerCase() !== VK_SHA256) {
+    return { valid: false, reason: 'attestation was produced by a different circuit build than this SDK verifies' };
+  }
   const proof = typeof input.attestation.proof === 'string' ? fromBase64(input.attestation.proof) : input.attestation.proof;
   const publicInputs =
     typeof input.attestation.publicInputs === 'string' ? fromBase64(input.attestation.publicInputs) : input.attestation.publicInputs;

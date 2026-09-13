@@ -17,7 +17,7 @@ its public inputs, and the wallet address it binds. Verify it locally:
 import { verifyIdentity } from '@pvium/zk-verifier';
 
 const result = await verifyIdentity({
-  attestation,                        // { proof, publicInputs, wallet } as returned by Pvium
+  attestation,                        // { proof, publicInputs, wallet, circuitVersion } as returned by Pvium
   signer: { jwksUrl: 'https://auth.privy.io/api/v1/apps/<pvium-app-id>/jwks.json' }, // or a pinned PEM
   identityType: 'email',              // Privy account type: 'email', 'github_oauth', 'twitter_oauth', …
   identityValue: 'you@example.com',   // the identity you asked Pvium to resolve
@@ -49,7 +49,7 @@ JWKS URL you trust; with a JWKS every P-256 key served is accepted, which covers
 | `verifyIdentity(input)` | the check above |
 | `IdentityType` | enum of identity ids, if you prefer it over the string names |
 | `shutdown()` | release the WASM verifier when your process is done |
-| `VK_SHA256` | hash of the bundled verification key, to confirm it matches a deployed verifier |
+| `CIRCUIT_VERSION`, `VK_SHA256` | the circuit version this release verifies, and its vk hash |
 
 Proof bytes and public inputs may be passed as `Uint8Array` or base64 strings.
 
@@ -79,9 +79,10 @@ The Honk verifier call costs about 4.4M gas.
 
 ## Versioning
 
-The verification key is tied to one circuit build, and `@aztec/bb.js` is pinned to the exact
-Barretenberg version that produced it (`5.0.0-nightly.20260522`). Attestations from a different
-circuit build will not verify. When the circuit changes:
+Each SDK release verifies exactly one circuit version (`CIRCUIT_VERSION`, with its vk embedded), and
+`@aztec/bb.js` is pinned to the Barretenberg that built it (`5.0.0-nightly.20260522`). Attestations
+carry `circuitVersion`; pass it through and a mismatch is reported by name rather than as an
+opaque "invalid proof". A circuit change ships as a new SDK version. When the circuit changes:
 
 ```sh
 yarn sync    # copy the new vk and sample proof from ../../circuit

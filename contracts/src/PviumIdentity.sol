@@ -20,6 +20,8 @@ contract PviumIdentity is IPviumIdentity {
     uint256 public constant PUBLIC_INPUT_COUNT = 11;
 
     IVerifier public immutable verifier;
+    /// @notice Circuit version this deployment verifies (see circuit/version.json). One deployment per version.
+    uint16 public immutable circuitVersion;
     /// @notice Registered signer public key, uncompressed P-256 coordinates.
     uint256 public immutable signerX;
     uint256 public immutable signerY;
@@ -41,14 +43,17 @@ contract PviumIdentity is IPviumIdentity {
     error UnknownSigner(bytes32 x, bytes32 y);
     error WrongPublicInputCount(uint256 got);
     error InvalidPublicKey();
+    error InvalidCircuitVersion();
     error IdentityTypeMismatch(uint8 expected, uint8 got);
     error IdentityMismatch();
     error NoWallet();
     error WalletMismatch();
 
-    constructor(IVerifier _verifier, uint256 _signerX, uint256 _signerY) {
+    constructor(IVerifier _verifier, uint16 _circuitVersion, uint256 _signerX, uint256 _signerY) {
         if (!_isOnCurve(_signerX, _signerY)) revert InvalidPublicKey();
+        if (_circuitVersion == 0) revert InvalidCircuitVersion();
         verifier = _verifier;
+        circuitVersion = _circuitVersion;
         signerX = _signerX;
         signerY = _signerY;
     }

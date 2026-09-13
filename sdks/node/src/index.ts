@@ -3,4 +3,4 @@ export type { Attestation, Signer, VerifyIdentityInput, VerifyIdentityResult } f
 export { IdentityType } from './identity.js';
 export type { IdentityTypeName } from './identityNames.js';
 export { shutdown } from './verify.js';
-export { VK_SHA256 } from './vk.js';
+export { VK_SHA256, CIRCUIT_VERSION } from './vk.js';
