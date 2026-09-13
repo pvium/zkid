@@ -1,0 +1,93 @@
+name: Deploy http-prover
+
+# Deploys only on an explicit tag or a manual run, into the protected `production` environment.
+# Configure the environment in Settings → Environments → production with required reviewers and a
+# deployment-branch/tag rule (e.g. tags matching prover-v*). Secrets it needs:
+#   VPS_HOST, VPS_USER, VPS_PASSWORD (a deploy-only user), VPS_APP_DIR
+# The service's .env (AUTH_TOKEN, PRIVY_JWKS_URL, …) is managed on the VPS and never touched here.
+on:
+  push:
+    tags: ['prover-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: { group: deploy-prover, cancel-in-progress: false }
+
+env:
+  NARGO_VERSION: 1.0.0-beta.22
+  BB_VERSION: 5.0.0-nightly.20260522
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nargo and bb
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          ~/.nargo/bin/noirup -v $NARGO_VERSION
+          curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash
+          ~/.bb/bbup -v $BB_VERSION
+          echo "$HOME/.nargo/bin" >> $GITHUB_PATH
+          echo "$HOME/.bb" >> $GITHUB_PATH
+
+      - name: Cache compiled circuit
+        id: circuit-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            circuit/target/pvium_identity.json
+            circuit/target/proof_email
+          key: circuit-${{ env.NARGO_VERSION }}-${{ env.BB_VERSION }}-${{ hashFiles('circuit/src/**', 'circuit/Nargo.toml', 'circuit/version.json') }}
+
+      - name: Compile circuit and write the vk
+        if: steps.circuit-cache.outputs.cache-hit != 'true'
+        working-directory: circuit
+        run: |
+          nargo compile
+          mkdir -p target/proof_email
+          bb write_vk -b target/pvium_identity.json -t evm -o target/proof_email
+
+      - name: Assemble the prover's circuit artifacts and check the version
+        working-directory: http-prover
+        run: |
+          sh scripts/sync-circuit.sh
+          actual="0x$(sha256sum circuit/vk | cut -d' ' -f1)"
+          expected=$(python3 -c "import json;print(json.load(open('circuit/version.json'))['vkSha256'])")
+          [ "$actual" = "$expected" ] || { echo "vk hash $actual != version.json $expected"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: yarn, cache-dependency-path: http-prover/yarn.lock }
+      - name: Build
+        working-directory: http-prover
+        run: yarn install --frozen-lockfile && yarn build
+
+      - name: Ship to the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}   # read by `sshpass -e`, never echoed
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync >/dev/null
+          mkdir -p ~/.ssh && ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=yes"
+          # Only what the service needs at runtime: built JS, circuit artifacts, package files, PM2 config.
+          rsync -az --delete -e "$SSH" \
+            --include='dist/***' --include='circuit/***' --include='package.json' --include='yarn.lock' \
+            --include='ecosystem.config.cjs' --include='README.md' --exclude='*' \
+            http-prover/ "$VPS_USER@$VPS_HOST:$VPS_APP_DIR/"
+          # The app dir is expanded here; the rest of the script runs verbatim on the VPS.
+          $SSH "$VPS_USER@$VPS_HOST" "cd '$VPS_APP_DIR' && bash -s" <<'REMOTE'
+            set -e
+            test -f .env || { echo ".env missing on the VPS; create it from .env.example"; exit 1; }
+            yarn install --frozen-lockfile --production
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+            sleep 3
+            curl -fsS "http://127.0.0.1:$(grep -E '^PORT=' .env | cut -d= -f2 || echo 8787)/healthz"
+          REMOTE

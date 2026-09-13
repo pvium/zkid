@@ -1,0 +1,8 @@
+{
+  "circuitVersion": 1,
+  "vkSha256": "0xd056e2946d329a6511374aa9a48789ad10ec62ee5e2bc766255af07fb1f501f1",
+  "nargo": "1.0.0-beta.22",
+  "barretenberg": "5.0.0-nightly.20260522",
+  "publicInputCount": 11,
+  "notes": "Bump circuitVersion whenever the compiled circuit (and so the vk) changes. Every consumer pins one version: the SDK release, the prover image, the deployed PviumIdentity contract."
+}

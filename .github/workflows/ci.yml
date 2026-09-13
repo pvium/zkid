@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Pull requests from forks get no secrets; nothing here needs any.
+permissions:
+  contents: read
+
+env:
+  NARGO_VERSION: 1.0.0-beta.22
+  BB_VERSION: 5.0.0-nightly.20260522
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: contracts } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: yarn, cache-dependency-path: contracts/yarn.lock }
+      - run: yarn install --frozen-lockfile
+      - run: yarn test
+
+  sdk:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: sdks/node } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: yarn, cache-dependency-path: sdks/node/yarn.lock }
+      - run: yarn install --frozen-lockfile
+      - run: yarn test
+
+  # Compiles the circuit (cached by source hash), then runs the Noir unit, e2e and adversarial
+  # suites and the prover's full proving test. Only worth the minutes when the circuit or the
+  # prover changed.
+  circuit-and-prover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changed
+        with:
+          filters: |
+            relevant:
+              - 'circuit/**'
+              - 'http-prover/**'
+              - 'sdks/node/**'
+              - '.github/workflows/ci.yml'
+      - name: Install nargo and bb
+        if: steps.changed.outputs.relevant == 'true'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          ~/.nargo/bin/noirup -v $NARGO_VERSION
+          curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash
+          ~/.bb/bbup -v $BB_VERSION
+          echo "$HOME/.nargo/bin" >> $GITHUB_PATH
+          echo "$HOME/.bb" >> $GITHUB_PATH
+      - name: Cache compiled circuit
+        if: steps.changed.outputs.relevant == 'true'
+        id: circuit-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            circuit/target/pvium_identity.json
+            circuit/target/proof_email
+          key: circuit-${{ env.NARGO_VERSION }}-${{ env.BB_VERSION }}-${{ hashFiles('circuit/src/**', 'circuit/Nargo.toml', 'circuit/version.json') }}
+      - name: Compile circuit and prove the sample
+        if: steps.changed.outputs.relevant == 'true' && steps.circuit-cache.outputs.cache-hit != 'true'
+        working-directory: circuit
+        run: |
+          nargo compile
+          python3 scripts/gen_prover.py --jwt "$(cat test/fixtures/sample_token.jwt)" --pubkey test/fixtures/privy_es256_public.pem \
+            --type email --value test-9988@privy.io --wallet 0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98 -o Prover.toml
+          nargo execute sample_email
+          bb prove -b target/pvium_identity.json -w target/sample_email.gz -t evm --write_vk --verify -o target/proof_email
+      - name: Check version.json matches the built vk
+        if: steps.changed.outputs.relevant == 'true'
+        working-directory: circuit
+        run: |
+          actual="0x$(sha256sum target/proof_email/vk | cut -d' ' -f1)"
+          expected=$(python3 -c "import json;print(json.load(open('version.json'))['vkSha256'])")
+          [ "$actual" = "$expected" ] || { echo "vk hash $actual != version.json $expected: bump circuit/version.json"; exit 1; }
+      - name: Noir unit, e2e and adversarial tests
+        if: steps.changed.outputs.relevant == 'true'
+        working-directory: circuit
+        run: |
+          nargo test
+          sh test/e2e.sh
+          sh test/adversarial.sh
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.relevant == 'true'
+        with: { node-version: 22 }
+      - name: Build the SDK (the prover's tests verify through it)
+        if: steps.changed.outputs.relevant == 'true'
+        working-directory: sdks/node
+        run: yarn install --frozen-lockfile && yarn sync && yarn build
+      - name: Prover tests, including a real proof
+        if: steps.changed.outputs.relevant == 'true'
+        working-directory: http-prover
+        run: yarn install --frozen-lockfile && yarn sync && yarn test
