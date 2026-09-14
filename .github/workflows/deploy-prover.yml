@@ -93,8 +93,8 @@ jobs:
             for tool in node yarn pm2; do
               command -v "$tool" >/dev/null || { echo "$tool not found on PATH for the deploy user (PATH=$PATH)"; exit 1; }
             done
-            node -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' \
-              || { echo "node $(node -v) at $(command -v node) is too old; the service needs >= 20.6. Install it for this user: nvm install 22 && nvm alias default 22"; exit 1; }
+            node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=13)?0:1)' \
+              || { echo "node $(node -v) at $(command -v node) is too old; the service needs >= 22.13 (node:sqlite). Install it for this user: nvm install 22 && nvm alias default 22"; exit 1; }
             echo "using node $(node -v), yarn $(yarn -v), pm2 $(pm2 -v)"
             test -f .env || { echo ".env missing on the VPS; create it from .env.example"; exit 1; }
             yarn install --frozen-lockfile --production
