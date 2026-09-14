@@ -82,7 +82,7 @@ jobs:
             --include='ecosystem.config.cjs' --include='README.md' --exclude='*' \
             http-prover/ "$VPS_USER@$VPS_HOST:$VPS_APP_DIR/"
           # The app dir is expanded here; the rest of the script runs verbatim on the VPS.
-          $SSH "$VPS_USER@$VPS_HOST" "cd '$VPS_APP_DIR' && bash -s" <<'REMOTE'
+          $SSH "$VPS_USER@$VPS_HOST" "cd '$VPS_APP_DIR' && BB_VERSION='$BB_VERSION' bash -s" <<'REMOTE'
             set -e
             # Non-interactive SSH shells skip .bashrc, so nvm-installed node/yarn/pm2 are not on PATH.
             export NVM_DIR="$HOME/.nvm"
@@ -96,6 +96,13 @@ jobs:
             node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=13)?0:1)' \
               || { echo "node $(node -v) at $(command -v node) is too old; the service needs >= 22.13 (node:sqlite). Install it for this user: nvm install 22 && nvm alias default 22"; exit 1; }
             echo "using node $(node -v), yarn $(yarn -v), pm2 $(pm2 -v)"
+            # Barretenberg prover: install or upgrade to the pinned version in this user's home (no sudo).
+            if [ "$(~/.bb/bb --version 2>/dev/null)" != "$BB_VERSION" ]; then
+              echo "installing bb $BB_VERSION"
+              curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash >/dev/null
+              ~/.bb/bbup -v "$BB_VERSION"
+            fi
+            echo "using bb $(~/.bb/bb --version)"
             test -f .env || { echo ".env missing on the VPS; create it from .env.example"; exit 1; }
             yarn install --frozen-lockfile --production
             pm2 startOrReload ecosystem.config.cjs --update-env

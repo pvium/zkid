@@ -119,7 +119,7 @@ so a deploy always needs an approval, and add these environment secrets:
 
 | Secret | Value |
 | --- | --- |
-| `VPS_HOST`, `VPS_USER` | host and a deploy-only user (needs `node`, `yarn`, `pm2`, and `bb` on PATH or `BB_BIN` in `.env`) |
+| `VPS_HOST`, `VPS_USER` | host and a deploy-only user (needs `node` >= 22.13, `yarn`, `pm2`; `bb` is installed by the deploy into `~/.bb` if missing) |
 | `VPS_PASSWORD` | that user's password (used via `sshpass`; a key would be better, see below) |
 | `VPS_APP_DIR` | directory the service lives in; its `.env` is created by hand from `.env.example` and never touched by CI |
 

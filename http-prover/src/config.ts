@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -65,4 +66,21 @@ export function loadCircuitVersion(cfg: ProverConfig): CircuitVersion {
     throw new Error(`vk at ${cfg.vkPath} hashes to ${actual} but version.json says ${v.vkSha256} (circuit version ${v.circuitVersion})`);
   }
   return { circuitVersion: v.circuitVersion, vkSha256: v.vkSha256 };
+}
+
+/**
+ * Confirm the bb binary runs and is the version the circuit was built with. Called at startup so
+ * a missing or wrong prover fails the deploy's health check instead of the first user's request.
+ */
+export function checkBb(cfg: ProverConfig, expectedVersion = '5.0.0-nightly.20260522'): string {
+  let out: string;
+  try {
+    out = execFileSync(cfg.bbBin, ['--version'], { encoding: 'utf8', timeout: 10_000 }).trim();
+  } catch (e) {
+    throw new Error(`bb not runnable at "${cfg.bbBin}" (${(e as Error).message}). Install it for this user: ~/.bb/bbup -v ${expectedVersion}, then set BB_BIN to its absolute path or unset it to use ~/.bb/bb`);
+  }
+  if (!out.includes(expectedVersion)) {
+    throw new Error(`bb at "${cfg.bbBin}" is version "${out}" but the circuit was built with ${expectedVersion}`);
+  }
+  return out;
 }
