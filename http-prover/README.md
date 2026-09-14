@@ -81,7 +81,8 @@ cp .env.example .env && $EDITOR .env
 yarn build && yarn start        # node --env-file=.env dist/server.js
 ```
 
-Requires Node 22.13+ (for `node:sqlite`) and the `bb` binary (`~/.bb/bb` by default, or `BB_BIN`) at the pinned version
+Requires a 64-bit Linux with glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+; the `bb` binary
+will not run on Ubuntu 20.04), Node 22.13+ (for `node:sqlite`) and the `bb` binary (`~/.bb/bb` by default, or `BB_BIN`) at the pinned version
 `5.0.0-nightly.20260522`. Configuration is entirely through `.env`; see `.env.example`. `PRIVY_JWKS_URL` may list several
 JWKS URLs, comma-separated, to trust more than one Privy app (production and sandbox, say) from one
 process: the token's `kid` and signature pick the key, and the response's `kid` says which app it
@@ -100,6 +101,18 @@ Solving runs in a worker thread, so one instance (see `ecosystem.config.cjs`) st
 yarn global add pm2
 pm2 start ecosystem.config.cjs && pm2 save && pm2 startup
 ```
+
+### Railway
+
+Set the service's **Root Directory** to `/http-prover` (and Watch Paths to `/http-prover/**`);
+`railway.json` selects the Dockerfile builder and the `/healthz` check. Add a volume mounted at
+`/app/data` for the outbox, set the variables from `.env.example` (`WORK_DIR`, `DB_PATH`,
+`CIRCUIT_JSON`, `VK_PATH` are preset by the image), and give the service at least 4 GB of memory.
+The circuit artifacts in `circuit/` are committed for exactly this reason: the build context is this
+folder alone, and the image must contain the circuit it serves. `pvium_identity.json.gz` is the
+compiled circuit stripped of source maps (4.6 MB); the service inflates it on first start. After a
+circuit change, `yarn sync` and commit the updated `.gz`, `vk` and `version.json` with the version
+bump.
 
 ### Docker
 

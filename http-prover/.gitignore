@@ -1,5 +1,6 @@
 node_modules/
 dist/
 .env
-circuit/
 data/
+# 13 MB full build; the stripped .gz next to it is what is committed
+circuit/pvium_identity.json

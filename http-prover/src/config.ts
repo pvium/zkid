@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SignerSource } from './token.js';
@@ -83,4 +84,15 @@ export function checkBb(cfg: ProverConfig, expectedVersion = '5.0.0-nightly.2026
     throw new Error(`bb at "${cfg.bbBin}" is version "${out}" but the circuit was built with ${expectedVersion}`);
   }
   return out;
+}
+
+/**
+ * The committed artifact is `<circuitJson>.gz` (stripped, ~4.6 MB). bb needs a plain file, so
+ * inflate it next to the archive on first start if the plain file is missing.
+ */
+export function ensureCircuitJson(cfg: ProverConfig): void {
+  if (existsSync(cfg.circuitJson)) return;
+  const gz = cfg.circuitJson + '.gz';
+  if (!existsSync(gz)) throw new Error(`circuit not found: neither ${cfg.circuitJson} nor ${gz} exists (run yarn sync)`);
+  writeFileSync(cfg.circuitJson, gunzipSync(readFileSync(gz)));
 }

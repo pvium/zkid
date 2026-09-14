@@ -1,4 +1,4 @@
-import { checkBb, loadCircuitVersion, type CircuitVersion, type ProverConfig } from './config.js';
+import { checkBb, ensureCircuitJson, loadCircuitVersion, type CircuitVersion, type ProverConfig } from './config.js';
 import { InputError } from './errors.js';
 import { PUBLIC_INPUT_COUNT, PUBLIC_INPUT_IAT, TYPES, type IdentityTypeName } from './identity.js';
 import { Prover } from './prove.js';
@@ -41,6 +41,7 @@ export class AttestationService {
   readonly version: CircuitVersion;
 
   constructor(private readonly cfg: ProverConfig) {
+    ensureCircuitJson(cfg);
     this.version = loadCircuitVersion(cfg);
     checkBb(cfg);
     this.prover = new Prover(cfg);
