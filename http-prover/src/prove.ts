@@ -72,9 +72,14 @@ export class Prover {
 
   private solve(inputs: CircuitInputs): Promise<Uint8Array> {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    // Keep the process alive while a solve is in flight; the worker is unref'd when idle so an
+    // otherwise-finished process (tests, CLI use) can exit without an explicit close().
+    this.worker.ref();
+    return new Promise<Uint8Array>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.worker.postMessage({ id, inputs });
+    }).finally(() => {
+      if (this.pending.size === 0) this.worker.unref();
     });
   }
 
