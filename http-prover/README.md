@@ -48,8 +48,11 @@ the proof is ready, about 8 s later:
 { "jobId": "…", "status": "error", "error": "no linked account with …", "identityType": "email", "identityValue": "…", "wallet": "0x…" }
 ```
 
-Delivery is retried three times over about 40 s on network errors or 5xx; a 4xx from your endpoint
-is treated as final. The delivery is not signed: put a secret in the callback URL if you need to
+The outcome is written to a SQLite outbox (`DB_PATH`, Node's built-in `node:sqlite`) *before* the
+first delivery attempt, so a proof that has been paid for is never lost to a restart or a flaky
+receiver. Delivery is retried with backoff (1 min, 5 min, 30 min, 2 h, then every 6 h) for up to
+48 hours until your endpoint answers 2xx; a 4xx is treated as final. `GET /jobs/:id` (auth) returns
+a job's delivery state and its result. Synchronous requests are not stored. The delivery is not signed: put a secret in the callback URL if you need to
 authenticate it, and remember the attestation is independently verifiable anyway. Callback URLs
 must be https unless `ALLOW_HTTP_CALLBACKS=true`. This is the mode to use from a login flow, where
 nothing is waiting on the HTTP response and client timeouts do not apply.
@@ -62,7 +65,11 @@ timeout later. `/healthz` reports `inFlight` and `queued`. Circuit solving runs 
 so the HTTP loop stays responsive while proving; run a single PM2 instance (the memory gate is per
 process).
 
-`GET /healthz` — liveness, no auth; reports `circuitVersion`, `vkHash`, `inFlight`, `queued`. Startup fails if the vk
+`GET /healthz` — liveness, no auth; reports `circuitVersion`, `vkHash`, `inFlight`, `queued`, and
+outbox job counts by status.
+
+`GET /jobs/:id` — auth; a callback job's status (`pending` / `delivered` / `failed`), attempts, last
+error, and its result (the attestation or the error that was delivered). Startup fails if the vk
 on disk does not hash to what `circuit/version.json` says, so a half-synced deploy cannot serve.
 
 ## Running
@@ -74,7 +81,7 @@ cp .env.example .env && $EDITOR .env
 yarn build && yarn start        # node --env-file=.env dist/server.js
 ```
 
-Requires the `bb` binary (`~/.bb/bb` by default, or `BB_BIN`) at the pinned version
+Requires Node 22.13+ (for `node:sqlite`) and the `bb` binary (`~/.bb/bb` by default, or `BB_BIN`) at the pinned version
 `5.0.0-nightly.20260522`. Configuration is entirely through `.env`; see `.env.example`. `PRIVY_JWKS_URL` may list several
 JWKS URLs, comma-separated, to trust more than one Privy app (production and sandbox, say) from one
 process: the token's `kid` and signature pick the key, and the response's `kid` says which app it
@@ -98,7 +105,7 @@ pm2 start ecosystem.config.cjs && pm2 save && pm2 startup
 
 ```sh
 yarn sync && docker build -t pvium-prover .
-docker run --env-file .env -p 8787:8787 --shm-size=1g pvium-prover
+docker run --env-file .env -p 8787:8787 --shm-size=1g -v prover-data:/app/data pvium-prover
 ```
 
 `WORK_DIR` defaults to `/dev/shm` in the image so witness files (which contain the token) never

@@ -12,6 +12,8 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY circuit ./circuit
 RUN yarn build
-ENV CIRCUIT_JSON=/app/circuit/pvium_identity.json VK_PATH=/app/circuit/vk WORK_DIR=/dev/shm PORT=8787
+ENV CIRCUIT_JSON=/app/circuit/pvium_identity.json VK_PATH=/app/circuit/vk WORK_DIR=/dev/shm PORT=8787 DB_PATH=/app/data/prover.db
+# The outbox (undelivered callback jobs + their attestations) must outlive the container.
+VOLUME /app/data
 EXPOSE 8787
 CMD ["node", "dist/server.js"]

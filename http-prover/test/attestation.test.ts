@@ -15,7 +15,7 @@ const WALLET = '0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98';
 
 const cfg = configFromEnv({ ...process.env, PRIVY_JWKS_URL: undefined, PRIVY_PUBLIC_KEY_PEM_FILE: pemFile,
   CIRCUIT_JSON: join(here, '..', 'circuit', 'pvium_identity.json'), VK_PATH: join(here, '..', 'circuit', 'vk'),
-  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true' });
+  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true', DB_PATH: ':memory:' });
 const canProve = existsSync(cfg.circuitJson) && existsSync(cfg.vkPath) && (cfg.bbBin.includes('/') ? existsSync(cfg.bbBin) : true);
 
 test('bad requests fail fast without proving', async () => {
@@ -32,6 +32,8 @@ test('bad requests fail fast without proving', async () => {
 test('async job delivers a real attestation to the callback', { skip: !canProve && 'bb / circuit artifacts not available' }, async () => {
   const { createServer } = await import('node:http');
   const { runWebhookJob } = await import('../src/webhook.js');
+  const { Outbox } = await import('../src/outbox.js');
+  const outbox = new Outbox(':memory:');
   let resolveBody: (b: string) => void;
   const got = new Promise<string>((r) => (resolveBody = r));
   const s = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { res.end('ok'); resolveBody(b); }); });
@@ -39,7 +41,8 @@ test('async job delivers a real attestation to the callback', { skip: !canProve 
   const service = new AttestationService(cfg);
   try {
     const url = new URL(`http://127.0.0.1:${(s.address() as { port: number }).port}/hook?secret=abc`);
-    await runWebhookJob(service, { identityType: 'email', identityValue: 'test-9988@privy.io', jwt, wallet: WALLET }, url, 'job-1');
+    await runWebhookJob(service, outbox, { identityType: 'email', identityValue: 'test-9988@privy.io', jwt, wallet: WALLET }, url, 'job-1');
+    assert.equal(outbox.get('job-1')!.status, 'delivered');
     const d = JSON.parse(await got) as { jobId: string; status: string; attestation: { circuitVersion: number; wallet: string } };
     assert.equal(d.jobId, 'job-1');
     assert.equal(d.status, 'ok');
@@ -47,6 +50,7 @@ test('async job delivers a real attestation to the callback', { skip: !canProve 
     assert.equal(d.attestation.circuitVersion, 1);
   } finally {
     s.close();
+    outbox.close();
     await service.close();
   }
 });

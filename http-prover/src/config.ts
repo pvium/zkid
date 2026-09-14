@@ -22,6 +22,10 @@ export interface ProverConfig {
   signer: SignerSource;
   /** Allow plain-http callback URLs (development only). */
   allowHttpCallbacks: boolean;
+  /** SQLite file for the callback outbox (":memory:" for tests). */
+  dbPath: string;
+  /** How often the dispatcher re-tries due callback deliveries. */
+  dispatchIntervalMs: number;
 }
 
 /** Build config from process.env (loaded from .env via `node --env-file=.env`). */
@@ -45,6 +49,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ProverConfi
     maxQueue: Math.max(0, Number(env.MAX_QUEUE ?? 20)),
     signer,
     allowHttpCallbacks: env.ALLOW_HTTP_CALLBACKS === 'true',
+    dbPath: env.DB_PATH ?? './data/prover.db',
+    dispatchIntervalMs: Math.max(1_000, Number(env.DISPATCH_INTERVAL_MS ?? 30_000)),
   };
 }
 

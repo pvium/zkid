@@ -45,6 +45,7 @@ sdks/node/contracts/     # generated copy of contracts/src at build time
 # --- Prover service (http-prover/) ---------------------------------------------------
 http-prover/dist/
 http-prover/circuit/           # synced copy of the compiled circuit + vk (yarn sync)
+http-prover/data/              # SQLite outbox (callback jobs + attestations)
 
 # --- Python (scripts) -----------------------------------------------------------
 __pycache__/

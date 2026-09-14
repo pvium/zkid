@@ -10,13 +10,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pemFile = join(here, '..', '..', 'circuit', 'test', 'fixtures', 'privy_es256_public.pem');
 const cfg = configFromEnv({ ...process.env, PRIVY_JWKS_URL: undefined, PRIVY_PUBLIC_KEY_PEM_FILE: pemFile,
   CIRCUIT_JSON: join(here, '..', 'circuit', 'pvium_identity.json'), VK_PATH: join(here, '..', 'circuit', 'vk'),
-  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true', MAX_QUEUE: '0' });
+  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true', MAX_QUEUE: '0', DB_PATH: ':memory:' });
 const SECRET = 's3cret';
 const app = createApp(cfg, SECRET);
 let server: Server;
 let base: string;
 await new Promise<void>((ok) => { server = app.listen(0, () => { base = `http://127.0.0.1:${(server.address() as { port: number }).port}`; ok(); }); });
-after(async () => { server.close(); await app.locals.service.close(); });
+after(async () => { server.close(); await app.locals.close(); });
 
 /** A one-shot local receiver for webhook deliveries. */
 async function receiver() {
@@ -107,6 +107,13 @@ test('async: answers 202 and delivers the outcome to the callback URL', async ()
     assert.equal(delivered.status, 'error'); // 'x.y.z' is not a token; the failure is delivered, not lost
     assert.match(delivered.error!, /token/);
     assert.equal(delivered.identityValue, 'a@b.c');
+
+    // The job is persisted and queryable, marked delivered after the receiver's 2xx.
+    const job = await (await fetch(`${base}/jobs/${jobId}`, { headers: { authorization: `Bearer ${SECRET}` } })).json() as { status: string; result: { status: string } };
+    assert.equal(job.status, 'delivered');
+    assert.equal(job.result.status, 'error');
+    assert.equal((await fetch(`${base}/jobs/${jobId}`)).status, 401);
+    assert.equal((await fetch(`${base}/jobs/nope`, { headers: { authorization: `Bearer ${SECRET}` } })).status, 404);
   } finally {
     hook.close();
   }
