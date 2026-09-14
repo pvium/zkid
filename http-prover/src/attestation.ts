@@ -14,6 +14,12 @@ export interface AttestationRequest {
   recipient?: string;
   /** Circuit version to prove for. Omit for the latest; this prover serves exactly one. */
   version?: number;
+  /**
+   * If set, the request is accepted with 202 and the attestation (or the error) is POSTed to this
+   * URL when ready. Put a secret in the URL if you need to authenticate the delivery. Without it
+   * the response is synchronous.
+   */
+  callbackUrl?: string;
 }
 
 /** What the resolution API stores and later returns; verifiable with @pvium/zk-verifier. */
@@ -37,6 +43,22 @@ export class AttestationService {
   constructor(private readonly cfg: ProverConfig) {
     this.version = loadCircuitVersion(cfg);
     this.prover = new Prover(cfg);
+  }
+
+  get stats() {
+    return this.prover.stats;
+  }
+
+  close(): Promise<void> {
+    return this.prover.close();
+  }
+
+  /** Structural validation only; throws InputError. Used to reject bad async requests up front. */
+  validateRequest(req: AttestationRequest): void {
+    validate(req);
+    if (req.version !== undefined && req.version !== this.version.circuitVersion) {
+      throw new InputError(`unsupported circuit version ${req.version}; this prover serves version ${this.version.circuitVersion}`);
+    }
   }
 
   async generate(req: AttestationRequest): Promise<Attestation> {
@@ -77,4 +99,5 @@ function validate(req: AttestationRequest): void {
   if (req.wallet !== undefined && (typeof req.wallet !== 'string' || req.wallet.length === 0)) throw new InputError('wallet must be a non-empty string');
   if (req.recipient !== undefined && !/^0x[0-9a-fA-F]{1,64}$/.test(req.recipient)) throw new InputError('recipient must be a hex field');
   if (req.version !== undefined && (!Number.isInteger(req.version) || req.version < 1)) throw new InputError('version must be a positive integer');
+  if (req.callbackUrl !== undefined && typeof req.callbackUrl !== 'string') throw new InputError('callbackUrl must be a string');
 }

@@ -1,10 +1,11 @@
-import { Noir, type CompiledCircuit } from '@noir-lang/noir_js';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { Worker } from 'node:worker_threads';
 import type { ProverConfig } from './config.js';
+import { InputError } from './errors.js';
 import type { CircuitInputs } from './witness.js';
 
 const execFileAsync = promisify(execFile);
@@ -14,26 +15,67 @@ export interface ProofBundle {
   publicInputs: Buffer;
 }
 
-/** Solves the circuit with noir_js (in-process WASM) and proves with the native bb binary. */
+/** Thrown when the wait queue is full; the HTTP layer maps it to 503 + Retry-After. */
+export class QueueFullError extends Error {
+  constructor(public readonly queued: number) {
+    super(`prover queue is full (${queued} waiting)`);
+    this.name = 'QueueFullError';
+  }
+}
+
+/**
+ * Solves the circuit in a worker thread (noir_js WASM) and proves with the native bb binary.
+ * Jobs are gated to `maxConcurrency` at a time (each prove peaks ~3 GB) with a bounded wait queue.
+ */
 export class Prover {
-  private noir: Noir;
+  private worker: Worker;
+  private nextId = 1;
+  private pending = new Map<number, { resolve: (w: Uint8Array) => void; reject: (e: Error) => void }>();
   private running = 0;
   private queue: Array<() => void> = [];
 
   constructor(private readonly cfg: ProverConfig) {
-    const circuit = JSON.parse(readFileSync(cfg.circuitJson, 'utf8')) as CompiledCircuit;
-    this.noir = new Noir(circuit);
+    this.worker = new Worker(join(dirname(fileURLToPath(import.meta.url)), 'solver.worker.js'), {
+      workerData: { circuitJson: cfg.circuitJson },
+    });
+    this.worker.on('message', (m: { id: number; witness?: Uint8Array; error?: string }) => {
+      const p = this.pending.get(m.id);
+      if (!p) return;
+      this.pending.delete(m.id);
+      if (m.witness) p.resolve(m.witness);
+      else p.reject(new InputError(`circuit rejected the inputs: ${m.error}`));
+    });
+    this.worker.on('error', (e) => {
+      for (const p of this.pending.values()) p.reject(e);
+      this.pending.clear();
+    });
+    this.worker.unref();
   }
 
-  /** Solve + prove, gated to `maxConcurrency` jobs at a time (each prove peaks ~3 GB). */
+  get stats() {
+    return { inFlight: this.running, queued: this.queue.length, maxConcurrency: this.cfg.maxConcurrency, maxQueue: this.cfg.maxQueue };
+  }
+
   async prove(inputs: CircuitInputs): Promise<ProofBundle> {
     await this.acquire();
     try {
-      const { witness } = await this.noir.execute(inputs); // already gzip-compressed
+      const witness = await this.solve(inputs);
       return await this.runBb(witness);
     } finally {
       this.release();
     }
+  }
+
+  async close(): Promise<void> {
+    await this.worker.terminate();
+  }
+
+  private solve(inputs: CircuitInputs): Promise<Uint8Array> {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.worker.postMessage({ id, inputs });
+    });
   }
 
   /** bb proves and, with --verify, checks its own output against the vk before we return it. */
@@ -60,6 +102,7 @@ export class Prover {
       this.running++;
       return Promise.resolve();
     }
+    if (this.queue.length >= this.cfg.maxQueue) return Promise.reject(new QueueFullError(this.queue.length));
     return new Promise((resolve) => this.queue.push(() => { this.running++; resolve(); }));
   }
 

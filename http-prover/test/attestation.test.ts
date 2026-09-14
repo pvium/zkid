@@ -15,14 +15,40 @@ const WALLET = '0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98';
 
 const cfg = configFromEnv({ ...process.env, PRIVY_JWKS_URL: undefined, PRIVY_PUBLIC_KEY_PEM_FILE: pemFile,
   CIRCUIT_JSON: join(here, '..', 'circuit', 'pvium_identity.json'), VK_PATH: join(here, '..', 'circuit', 'vk'),
-  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json') });
+  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true' });
 const canProve = existsSync(cfg.circuitJson) && existsSync(cfg.vkPath) && (cfg.bbBin.includes('/') ? existsSync(cfg.bbBin) : true);
 
 test('bad requests fail fast without proving', async () => {
   const service = new AttestationService(cfg);
-  await assert.rejects(() => service.generate({ identityType: 'email', identityValue: 'x', jwt: 'not.a.jwt.at.all', wallet: WALLET }), InputError);
-  await assert.rejects(() => service.generate({ identityType: 'nope' as never, identityValue: 'x', jwt, wallet: WALLET }), InputError);
-  await assert.rejects(() => service.generate({ identityType: 'email', identityValue: 'other@privy.io', jwt, wallet: WALLET }), InputError);
+  try {
+    await assert.rejects(() => service.generate({ identityType: 'email', identityValue: 'x', jwt: 'not.a.jwt.at.all', wallet: WALLET }), InputError);
+    await assert.rejects(() => service.generate({ identityType: 'nope' as never, identityValue: 'x', jwt, wallet: WALLET }), InputError);
+    await assert.rejects(() => service.generate({ identityType: 'email', identityValue: 'other@privy.io', jwt, wallet: WALLET }), InputError);
+  } finally {
+    await service.close();
+  }
+});
+
+test('async job delivers a real attestation to the callback', { skip: !canProve && 'bb / circuit artifacts not available' }, async () => {
+  const { createServer } = await import('node:http');
+  const { runWebhookJob } = await import('../src/webhook.js');
+  let resolveBody: (b: string) => void;
+  const got = new Promise<string>((r) => (resolveBody = r));
+  const s = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { res.end('ok'); resolveBody(b); }); });
+  await new Promise<void>((ok) => s.listen(0, ok));
+  const service = new AttestationService(cfg);
+  try {
+    const url = new URL(`http://127.0.0.1:${(s.address() as { port: number }).port}/hook?secret=abc`);
+    await runWebhookJob(service, { identityType: 'email', identityValue: 'test-9988@privy.io', jwt, wallet: WALLET }, url, 'job-1');
+    const d = JSON.parse(await got) as { jobId: string; status: string; attestation: { circuitVersion: number; wallet: string } };
+    assert.equal(d.jobId, 'job-1');
+    assert.equal(d.status, 'ok');
+    assert.equal(d.attestation.wallet, WALLET);
+    assert.equal(d.attestation.circuitVersion, 1);
+  } finally {
+    s.close();
+    await service.close();
+  }
 });
 
 test('generates an attestation the SDK verifies', { skip: !canProve && 'bb / circuit artifacts not available' }, async (t) => {
@@ -50,5 +76,6 @@ test('generates an attestation the SDK verifies', { skip: !canProve && 'bb / cir
     assert.equal(wrong.valid, false);
   } finally {
     await shutdown();
+    await service.close();
   }
 });

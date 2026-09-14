@@ -17,7 +17,11 @@ export interface ProverConfig {
   bbBin: string;
   workDir: string;
   maxConcurrency: number;
+  /** Jobs allowed to wait for a slot before new requests get 503. */
+  maxQueue: number;
   signer: SignerSource;
+  /** Allow plain-http callback URLs (development only). */
+  allowHttpCallbacks: boolean;
 }
 
 /** Build config from process.env (loaded from .env via `node --env-file=.env`). */
@@ -38,7 +42,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ProverConfi
     bbBin: env.BB_BIN ?? defaultBb,
     workDir: env.WORK_DIR ?? tmpdir(),
     maxConcurrency: Math.max(1, Number(env.MAX_CONCURRENCY ?? 1)),
+    maxQueue: Math.max(0, Number(env.MAX_QUEUE ?? 20)),
     signer,
+    allowHttpCallbacks: env.ALLOW_HTTP_CALLBACKS === 'true',
   };
 }
 

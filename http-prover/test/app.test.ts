@@ -10,13 +10,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pemFile = join(here, '..', '..', 'circuit', 'test', 'fixtures', 'privy_es256_public.pem');
 const cfg = configFromEnv({ ...process.env, PRIVY_JWKS_URL: undefined, PRIVY_PUBLIC_KEY_PEM_FILE: pemFile,
   CIRCUIT_JSON: join(here, '..', 'circuit', 'pvium_identity.json'), VK_PATH: join(here, '..', 'circuit', 'vk'),
-  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json') });
+  CIRCUIT_VERSION_JSON: join(here, '..', 'circuit', 'version.json'), ALLOW_HTTP_CALLBACKS: 'true', MAX_QUEUE: '0' });
 const SECRET = 's3cret';
 const app = createApp(cfg, SECRET);
 let server: Server;
 let base: string;
 await new Promise<void>((ok) => { server = app.listen(0, () => { base = `http://127.0.0.1:${(server.address() as { port: number }).port}`; ok(); }); });
-after(() => server.close());
+after(async () => { server.close(); await app.locals.service.close(); });
+
+/** A one-shot local receiver for webhook deliveries. */
+async function receiver() {
+  const { createServer } = await import('node:http');
+  let resolveBody: (b: string) => void;
+  const got = new Promise<string>((r) => (resolveBody = r));
+  const s = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { res.end('ok'); resolveBody(b); }); });
+  await new Promise<void>((ok) => s.listen(0, ok));
+  return { url: `http://127.0.0.1:${(s.address() as { port: number }).port}/hook?secret=abc`, got, close: () => s.close() };
+}
 
 const post = (body: unknown, auth?: string) =>
   fetch(`${base}/attestations`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: typeof body === 'string' ? body : JSON.stringify(body) });
@@ -76,6 +86,37 @@ test('trusts every key across several JWKS sources; the token picks its own', as
   } finally {
     a.close(); b.close();
   }
+});
+
+test('healthz reports queue stats', async () => {
+  const body = (await (await fetch(`${base}/healthz`)).json()) as { inFlight: number; queued: number; maxConcurrency: number };
+  assert.equal(body.inFlight, 0);
+  assert.equal(body.queued, 0);
+  assert.equal(body.maxConcurrency, 1);
+});
+
+test('async: answers 202 and delivers the outcome to the callback URL', async () => {
+  const hook = await receiver();
+  try {
+    const r = await post({ identityType: 'email', identityValue: 'a@b.c', jwt: 'x.y.z', wallet: '0x1', callbackUrl: hook.url }, `Bearer ${SECRET}`);
+    assert.equal(r.status, 202);
+    const { jobId, status } = (await r.json()) as { jobId: string; status: string };
+    assert.equal(status, 'queued');
+    const delivered = JSON.parse(await hook.got) as { jobId: string; status: string; error?: string; identityValue: string };
+    assert.equal(delivered.jobId, jobId);
+    assert.equal(delivered.status, 'error'); // 'x.y.z' is not a token; the failure is delivered, not lost
+    assert.match(delivered.error!, /token/);
+    assert.equal(delivered.identityValue, 'a@b.c');
+  } finally {
+    hook.close();
+  }
+});
+
+test('async: rejects bad callback URLs up front', async () => {
+  const bad = await post({ identityType: 'email', identityValue: 'a@b.c', jwt: 'x.y.z', wallet: '0x1', callbackUrl: 'not a url' }, `Bearer ${SECRET}`);
+  assert.equal(bad.status, 400);
+  const badBody = await post({ identityType: 'email', jwt: 'x.y.z', callbackUrl: 'https://example.com/hook' }, `Bearer ${SECRET}`);
+  assert.equal(badBody.status, 400); // identityValue missing: validated before accepting
 });
 
 test('rejects oversized bodies with 413', async () => {

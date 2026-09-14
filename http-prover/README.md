@@ -37,7 +37,32 @@ to one version and reject others. `issuedAt` is when Privy issued the token, the
 
 Bad tokens are rejected in milliseconds by a native signature check before any proving starts.
 
-`GET /healthz` — liveness, no auth; reports `circuitVersion` and `vkHash`. Startup fails if the vk
+### Asynchronous mode
+
+Add `"callbackUrl": "https://your-backend/hooks/attestation?secret=…"` to the request and the
+prover answers `202 { jobId, status: "queued" }` at once, then POSTs the outcome to that URL when
+the proof is ready, about 8 s later:
+
+```json
+{ "jobId": "…", "status": "ok", "attestation": { … }, "identityType": "email", "identityValue": "…", "wallet": "0x…" }
+{ "jobId": "…", "status": "error", "error": "no linked account with …", "identityType": "email", "identityValue": "…", "wallet": "0x…" }
+```
+
+Delivery is retried three times over about 40 s on network errors or 5xx; a 4xx from your endpoint
+is treated as final. The delivery is not signed: put a secret in the callback URL if you need to
+authenticate it, and remember the attestation is independently verifiable anyway. Callback URLs
+must be https unless `ALLOW_HTTP_CALLBACKS=true`. This is the mode to use from a login flow, where
+nothing is waiting on the HTTP response and client timeouts do not apply.
+
+### Back-pressure
+
+Proves run at most `MAX_CONCURRENCY` at a time (about 3 GB each) and up to `MAX_QUEUE` requests wait
+for a slot; beyond that, both modes get `503` with `Retry-After: 10` immediately rather than a
+timeout later. `/healthz` reports `inFlight` and `queued`. Circuit solving runs in a worker thread,
+so the HTTP loop stays responsive while proving; run a single PM2 instance (the memory gate is per
+process).
+
+`GET /healthz` — liveness, no auth; reports `circuitVersion`, `vkHash`, `inFlight`, `queued`. Startup fails if the vk
 on disk does not hash to what `circuit/version.json` says, so a half-synced deploy cannot serve.
 
 ## Running
@@ -59,9 +84,8 @@ pin the production key.
 ### Sizing
 
 One attestation takes about 8 s on a 14-core machine: ~3 s solving (single-threaded WASM) and ~5 s
-proving (all cores, ~3 GB peak). Set `MAX_CONCURRENCY` to `floor(RAM / 3 GB)`; extra requests queue.
-Solving blocks the Node event loop, so run two instances (see `ecosystem.config.cjs`) to keep
-`/healthz` responsive.
+proving (all cores, ~3 GB peak). Set `MAX_CONCURRENCY` to `floor(RAM / 3 GB)`; up to `MAX_QUEUE` extra requests wait, the rest get 503.
+Solving runs in a worker thread, so one instance (see `ecosystem.config.cjs`) stays responsive.
 
 ### VPS with PM2
 

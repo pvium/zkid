@@ -6,9 +6,14 @@ module.exports = {
       name: 'pvium-prover',
       script: 'dist/server.js',
       node_args: '--env-file=.env',
-      instances: 2, // noir_js solving blocks the event loop ~3 s; a second instance keeps /healthz answering
-      exec_mode: 'cluster',
+      // One instance: solving runs in a worker thread, so the HTTP loop stays responsive, and the
+      // memory gate (MAX_CONCURRENCY × ~3 GB) is global. More instances multiply that memory.
+      instances: 1,
+      exec_mode: 'fork',
       max_memory_restart: '3500M',
+      kill_timeout: 20000, // let an in-flight prove (~8 s) finish on reload before SIGKILL
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
   ],
 };
