@@ -38,9 +38,9 @@ export function normalizeIdentityValue(type: IdentityType, value: string): strin
  * This is the routing salt a payer uses to address an identity, and the value a proof's
  * `identityHash` output is compared against.
  */
-export async function identityHash(type: IdentityType, value: string): Promise<`0x${string}`> {
+export async function identityHash(type: IdentityType, value: string, domain: string = HASH_PREFIX): Promise<`0x${string}`> {
   const enc = new TextEncoder();
-  const prefix = enc.encode(HASH_PREFIX);
+  const prefix = enc.encode(domain);
   const body = enc.encode(normalizeIdentityValue(type, value));
   if (body.length < 1 || body.length > 128) throw new Error('identity value must be 1..128 bytes');
   const preimage = new Uint8Array(prefix.length + 1 + body.length);

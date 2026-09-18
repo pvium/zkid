@@ -54,7 +54,7 @@ another claim. Nested braces are rejected so type and value must come from the s
 
 | Name | Kind | Meaning |
 | --- | --- | --- |
-| `identity_type` | public input (u8) | Id from `identity.nr` (0 = email, 5 = github_oauth, 12 = wallet, …) |
+| `identity_type` | public input (u8) | Id from `identity.nr`; full table in [P2ID.md](../P2ID.md#identity-types) |
 | `wallet` | public input (Field) | EVM address of the wallet slot's account; the circuit decodes the `0x…` value it read from the token and asserts equality. Zero for base58 wallets or no wallet slot |
 | `signature` | private | ES256 `r ‖ s` from the token, **normalised to low-s** (see below) |
 | `signer_x`, `signer_y` | private | P-256 public key coordinates the token was signed with |

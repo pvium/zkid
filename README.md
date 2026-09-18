@@ -2,9 +2,12 @@
 
 Zero-knowledge circuits and proof tooling for Pvium.
 
+**[P2ID.md](P2ID.md)** is the protocol specification: how an identity (email, social handle, phone,
+wallet) maps to a chain-agnostic address, the identity type ids, and how a claim works.
+
 | Folder | Purpose |
 | --- | --- |
-| `circuit/` | Circuit source, compiled artifacts (r1cs/wasm/zkey), and trusted setup outputs |
-| `sdks/node/` | npm package `@pvium/zk-verifier`: verify attestations off-chain; ships the Solidity sources too |
+| `circuit/` | Noir circuit: proves a Privy identity token contains a linked account and wallet |
+| `sdks/node/` | npm package `@pvium/zkid`: verify attestations off-chain, derive P2ID addresses; ships the Solidity sources too |
 | `http-prover/` | Attestation service: token in, proof out (Express + noir_js + native bb) |
-| `contracts/` | Smart contracts that verify proofs on-chain |
+| `contracts/` | On-chain verification, per-identity vaults and the vault factory |

@@ -68,7 +68,10 @@ describe('PviumP2IdVaultFactory', function () {
 
   it('the init code hash the Node SDK ships (sdks/node/src/p2id.json) matches this build', async () => {
     const sdk = JSON.parse(readFileSync(join(__dirname, '..', '..', 'sdks', 'node', 'src', 'p2id.json'), 'utf8'));
-    expect(await factory.initCodeHash()).to.equal(sdk.vaultInitCodeHash, 'run: node sdks/node/scripts/embed-p2id.mjs --update');
+    expect(await factory.initCodeHash()).to.equal(
+      sdk.schemes[sdk.current].vaultInitCodeHash,
+      'vault bytecode changed: run node sdks/node/scripts/embed-p2id.mjs --update, or add the next p2id.vault.vN if this scheme is released',
+    );
   });
 
   it('deploy is idempotent and different identities get different addresses', async () => {

@@ -99,10 +99,12 @@ OWNER=0xMultisig ATTESTER=0xAttester PRIVY_PEM=test/fixtures/privy_es256_public.
 
 Run it once per chain **with identical values**. It deploys the two Honk libraries,
 `PviumZKVerifier`, `PviumIdentity`, `PviumVerifier` and `PviumP2IdVaultFactory`, skips anything
-already deployed, and prints the addresses. Record `factory` in `sdks/node/src/p2id.json`; the
-SDK then derives every identity's address from constants alone, with no chain id.
+already deployed, and prints the addresses. Record `factory` under the scheme (`p2id.vault.v1`) in
+`sdks/node/src/p2id.json`, which freezes that scheme; the SDK then derives every identity's address
+from constants alone, with no chain id. The scheme domain is the factory's namespace and the
+deployment salt, so a future `p2id.vault.v2` is a separate stack at separate addresses.
 
-- Any different parameter (owner, Privy key, attester, delays, namespace) is a different stack at
+- Any different parameter (owner, Privy key, attester, delays, scheme) is a different stack at
   different addresses, so the addresses are a commitment to the configuration. The owner must be
   an address that exists on every chain, e.g. a Safe deployed at the same address everywhere.
 - `metadata.bytecodeHash` is `none` in `hardhat.config.ts` so that a comment edit cannot move an
@@ -129,7 +131,7 @@ SDK then derives every identity's address from constants alone, with no chain id
 
 | # | Name | Contents |
 | --- | --- | --- |
-| 0 | `identity_type` | id from `circuit/src/identity.nr` (0 = email, 5 = github_oauth, 12 = wallet) |
+| 0 | `identity_type` | identity type id, 0 = email … 12 = wallet; full table in [P2ID.md](../P2ID.md#identity-types) |
 | 1 | `wallet` | EVM address of the linked wallet, checked in-circuit against the token; zero for non-EVM wallets or no wallet |
 | 2, 3 | `signer_x_hi`, `signer_x_lo` | signer public key X as two 128-bit halves |
 | 4, 5 | `signer_y_hi`, `signer_y_lo` | signer public key Y as two 128-bit halves |

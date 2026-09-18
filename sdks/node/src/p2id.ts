@@ -1,66 +1,77 @@
 import { keccak_256 } from '@noble/hashes/sha3';
 import { IdentityType, identityHash as hashIdentity, toHex } from './identity.js';
 import { resolveIdentityType, type IdentityTypeName } from './identityNames.js';
-import { P2ID_FACTORY, P2ID_VAULT_INIT_CODE_HASH } from './p2idConstants.js';
+import { P2ID_SCHEME, P2ID_SCHEMES, type P2IDScheme, type P2IDSchemeName } from './p2idConstants.js';
 
-export { P2ID_FACTORY, P2ID_VAULT_INIT_CODE_HASH };
+export { P2ID_SCHEME, P2ID_SCHEMES };
+export type { P2IDScheme, P2IDSchemeName };
 
 /**
- * P2ID v1 address derivation.
+ * P2ID address derivation.
  *
- *   identityHash = sha256("p2id.identity.v1" ‖ typeId ‖ normalize(value))
- *   vault        = keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(P2IDVault creationCode))[12..]
+ *   identityHash = sha256(identityDomain ‖ byte(typeId) ‖ normalize(value))
+ *   p2id         = keccak256(0xff ‖ factory ‖ identityHash ‖ vaultInitCodeHash)[12..]
  *
  * `normalize` ASCII-lowercases every type except phone and wallet, and lowercases `0x…` wallet
- * addresses. The vault takes no constructor arguments, so the creation-code hash is a constant
- * per release (`P2ID_VAULT_INIT_CODE_HASH`) and the address depends only on the factory and the
- * identity. The factory itself is deployed through the deterministic deployment proxy, so it is
- * at the same address on every EVM chain: a P2ID address is chain-agnostic, like any wallet
- * address. (The vault contract still has to be deployed on each chain where it is claimed;
- * anyone can do that, and funds sent before then are claimable once it is.)
+ * addresses. A *scheme* (`p2id.vault.vN`) fixes the three constants: the identity domain, the
+ * vault creation-code hash and the factory. The factory is deployed through the deterministic
+ * deployment proxy, so it is at the same address on every EVM chain: a P2ID address is
+ * chain-agnostic, like any wallet address. (The vault contract still has to be deployed on each
+ * chain where it is claimed; anyone can do that, and funds sent before then are claimable once
+ * it is.)
+ *
+ * Schemes are history. A change to the vault bytecode moves every address, so it ships as the
+ * next scheme and becomes `P2ID_SCHEME`; earlier schemes stay in `P2ID_SCHEMES` so addresses
+ * people were already given can be derived, and claimed, forever.
  */
 
+/** Constants of a scheme; defaults to the current one. */
+export function p2idScheme(name: P2IDSchemeName | string = P2ID_SCHEME): P2IDScheme {
+  const s = (P2ID_SCHEMES as Record<string, P2IDScheme>)[name];
+  if (!s) throw new Error(`unknown P2ID scheme "${name}" (known: ${Object.keys(P2ID_SCHEMES).join(', ')})`);
+  return s;
+}
+
 /** The identity commitment: the CREATE2 salt of the identity's vault and the value proofs bind. */
-export function identityHash(type: IdentityType | IdentityTypeName, value: string): Promise<`0x${string}`> {
-  return hashIdentity(resolveIdentityType(type), value);
+export function identityHash(
+  type: IdentityType | IdentityTypeName,
+  value: string,
+  scheme: P2IDSchemeName | string = P2ID_SCHEME,
+): Promise<`0x${string}`> {
+  return hashIdentity(resolveIdentityType(type), value, p2idScheme(scheme).identityDomain);
 }
 
 export interface P2IDAddressInput {
   identityType: IdentityType | IdentityTypeName;
   /** The identity as the user linked it, e.g. "you@example.com". Case does not matter. */
   identityValue: string;
-  /** Derive against another factory than Pvium's (`P2ID_FACTORY`), e.g. a test deployment. */
+  /** Address scheme; defaults to the current one (`P2ID_SCHEME`). Pass an older one to find an address issued under it. */
+  scheme?: P2IDSchemeName | string;
+  /** Derive against another factory than the scheme's (e.g. a test deployment). */
   factory?: `0x${string}`;
-  /** Override the vault creation-code hash (e.g. for a factory built from a different vault release). */
-  initCodeHash?: `0x${string}`;
 }
 
-/** The P2ID v1 address for an identity: where to pay it, on any EVM chain, deployed or not. Checksummed. */
+/** The P2ID address for an identity: where to pay it, on any EVM chain, deployed or not. Checksummed. */
 export async function p2idAddress(input: P2IDAddressInput): Promise<`0x${string}`> {
-  const salt = await identityHash(input.identityType, input.identityValue);
-  return p2idAddressForHash(salt, input.factory, input.initCodeHash);
+  const salt = await identityHash(input.identityType, input.identityValue, input.scheme);
+  return p2idAddressForHash(salt, { scheme: input.scheme, factory: input.factory });
 }
 
 /** Same, from an identity hash you already have (e.g. from an attestation's claim). */
 export function p2idAddressForHash(
   identityHash: `0x${string}`,
-  factory?: `0x${string}`,
-  initCodeHash: `0x${string}` = P2ID_VAULT_INIT_CODE_HASH,
+  opts: { scheme?: P2IDSchemeName | string; factory?: `0x${string}` } = {},
 ): `0x${string}` {
-  const factoryAddress = resolveFactory(factory);
+  const scheme = p2idScheme(opts.scheme);
+  const factory = opts.factory ?? scheme.factory;
+  if (!factory) throw new Error(`scheme ${opts.scheme ?? P2ID_SCHEME} has no factory address in this release yet; pass \`factory\` explicitly`);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(factory)) throw new Error(`bad factory address ${factory}`);
   const preimage = new Uint8Array(1 + 20 + 32 + 32);
   preimage[0] = 0xff;
-  preimage.set(hexToBytes(factoryAddress, 20), 1);
+  preimage.set(hexToBytes(factory, 20), 1);
   preimage.set(hexToBytes(identityHash, 32), 21);
-  preimage.set(hexToBytes(initCodeHash, 32), 53);
+  preimage.set(hexToBytes(scheme.vaultInitCodeHash, 32), 53);
   return checksumAddress(toHex(keccak_256(preimage).subarray(12)));
-}
-
-function resolveFactory(factory?: `0x${string}`): `0x${string}` {
-  const f = factory ?? P2ID_FACTORY;
-  if (!f) throw new Error('this release has no Pvium P2ID factory address yet; pass `factory` explicitly');
-  if (!/^0x[0-9a-fA-F]{40}$/.test(f)) throw new Error(`bad factory address ${f}`);
-  return f;
 }
 
 /** EIP-55 checksum. */

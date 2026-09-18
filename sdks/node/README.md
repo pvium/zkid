@@ -91,7 +91,7 @@ generated; re-resolve later or apply your own policy.
 | `IdentityType` | enum of identity ids, if you prefer it over the string names |
 | `shutdown()` | release the WASM verifier when your process is done |
 | `CIRCUIT_VERSION`, `VK_SHA256` | the circuit version this release verifies, and its vk hash |
-| `p2idAddress(input)`, `identityHash(type, value)`, `P2ID_FACTORY` | chain-agnostic P2ID v1 address derivation, see below |
+| `p2idAddress(input)`, `identityHash(type, value)`, `P2ID_SCHEME`, `P2ID_SCHEMES` | chain-agnostic P2ID address derivation, see below |
 
 Proof bytes and public inputs may be passed as `Uint8Array` or base64 strings.
 
@@ -112,10 +112,41 @@ const t = await p2idAddress({ identityType: 'github_oauth', identityValue: 'octo
 
 The derivation is `keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(P2IDVault creationCode))`
 with `identityHash = sha256("p2id.identity.v1" ‖ typeId ‖ normalize(value))`; `normalize`
-lowercases everything except phone numbers and non-`0x` wallet addresses. The creation-code hash
-is `P2ID_VAULT_INIT_CODE_HASH`. The factory, `P2ID_FACTORY`, is deployed through the deterministic
-deployment proxy (`contracts/scripts/deploy-deterministic.ts`), so it sits at one address on every
-chain, which is why no chain id appears anywhere above.
+lowercases everything except phone numbers and non-`0x` wallet addresses. The factory is deployed
+through the deterministic deployment proxy (`contracts/scripts/deploy-deterministic.ts`), so it sits
+at one address on every chain, which is why no chain id appears anywhere above.
+
+The constants come from an address **scheme**, named by a domain: `P2ID_SCHEME` is the current one
+(`p2id.vault.v1`) and `P2ID_SCHEMES` holds every scheme this release knows, each with its
+`identityDomain`, `vaultInitCodeHash` and `factory`. A change to the vault ships as the next
+scheme; older ones stay, so an address issued earlier can still be derived by passing
+`scheme: 'p2id.vault.v1'`.
+
+### Identity types
+
+`identityType` accepts the Privy type name or the numeric id (`IdentityType`). The id, not the
+name, is what gets hashed, so a platform rename can never move an address. The table is
+append-only: ids are never reassigned.
+
+| Id | Type | Value field | Lowercased |
+| ---: | --- | --- | :---: |
+| 0 | `email` | `address` | yes |
+| 1 | `phone` | `number` | no |
+| 2 | `google_oauth` | `email` | yes |
+| 3 | `twitter_oauth` (X) | `username` | yes |
+| 4 | `discord_oauth` | `username` | yes |
+| 5 | `github_oauth` | `username` | yes |
+| 6 | `linkedin_oauth` | `email` | yes |
+| 7 | `apple_oauth` | `email` | yes |
+| 8 | `telegram` | `username` | yes |
+| 9 | `tiktok_oauth` | `username` | yes |
+| 10 | `instagram_oauth` | `username` | yes |
+| 11 | `farcaster` | `username` | yes |
+| 12 | `wallet` | `address` | only `0x…` |
+
+Handles are written without a leading `@`; phone numbers are E.164 with the `+`. The same email
+under `email`, `google_oauth`, `linkedin_oauth` and `apple_oauth` is four different identities.
+The full specification is in [P2ID.md](https://github.com/pvium/zkid/blob/main/P2ID.md).
 
 A plain ERC-20 transfer to that address is claimable by the identity's owner once anyone deploys
 the vault on that chain; use the factory's `fund()` when you need refund rights or a funding
