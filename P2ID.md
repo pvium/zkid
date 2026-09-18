@@ -1,15 +1,15 @@
-# P2ID: paying an identity
+# P2ID: pay to any identity
 
-A P2ID address is an ordinary EVM address that belongs to an identity (an email, a social handle,
-a phone number, a wallet) rather than to a key. Anyone can compute it from the identity alone,
-send ERC-20 tokens to it on any EVM chain, and only the person who controls that identity can
-claim them, by proving it in zero knowledge from their Privy identity token.
+P2ID derives deterministic EVM vault addresses from identities: email addresses, social handles,
+phone numbers and wallet addresses. Anyone can derive an address and send ERC-20 tokens to it
+before the vault is deployed. Claims pay a wallet linked to the identity in a Privy identity
+token, verified through a zero-knowledge proof.
 
-This document is the specification. The circuit (`circuit/`), the Solidity library
-(`contracts/src/lib/PviumHash.sol`), the prover (`http-prover/`) and the SDK (`sdks/node/`) all
-implement exactly this and are tested against each other.
+This specification defines address derivation, identity encoding, versioning and claim semantics.
+The circuit (`circuit/`), Solidity library (`contracts/src/lib/PviumHash.sol`), prover
+(`http-prover/`) and SDK (`sdks/node/`) must implement the same rules.
 
-## The address
+## Address derivation
 
 ```
 v            = lowercase(value)   unless the type is phone, or the type is wallet and the
@@ -25,35 +25,34 @@ p2id         = last 20 bytes of Keccak-256( 0xff ‖ factory ‖ identityHash �
 | `"p2id.identity.v1"` | ASCII domain prefix | 16 bytes |
 | `typeId` | identity type id, see the table below | 1 byte |
 | `value` | the identity as UTF-8; lowercasing is ASCII only (`A`–`Z`) | 1–128 bytes |
-| `factory` | the `PviumP2IdVaultFactory` address, the same on every chain | 20 bytes |
+| `factory` | `PviumP2IdVaultFactory` address for the scheme and environment | 20 bytes |
 | `vaultInitCodeHash` | Keccak-256 of the `P2IDVault` creation bytecode | 32 bytes |
 
-`‖` is byte concatenation. The second line is CREATE2 with the identity hash as the salt, so the
-address is the address of the identity's vault, whether or not the vault has been deployed yet.
-Addresses are displayed with an EIP-55 checksum.
+`‖` denotes byte concatenation. The address formula uses CREATE2 with `identityHash` as the
+salt and is independent of whether the vault has been deployed. Addresses are displayed with
+an EIP-55 checksum.
 
-The identity hash is also the commitment a proof binds to and the value a vault stores, so the
-address, the claim check and the proof all agree on one number.
+The same `identityHash` serves as the proof's identity commitment and the vault's stored
+commitment, binding address derivation and claim verification to one identity.
 
 ### Schemes and versions
 
-Two things are versioned, independently, and both by a dotted domain:
+Identity hashing and vault addressing use independently versioned domains:
 
 | Domain | Versions | Changes when |
 | --- | --- | --- |
 | `p2id.identity.vN` | the identity hash: prefix, type table, normalisation | the commitment changes (needs a new circuit) |
 | `p2id.vault.vN` | the address: `factory` and `vaultInitCodeHash` | the vault bytecode or the factory changes |
 
-An address scheme names the identity domain it builds on, so a vault fix can ship as
-`p2id.vault.v2` without touching the circuit or anyone's proofs. The scheme domain is an input,
-not only a label: `keccak256("p2id.vault.v1")` is the factory's namespace and the salt it is
-deployed with.
+Each address scheme specifies its identity domain. A vault update can introduce
+`p2id.vault.v2` without changing the circuit or existing proofs. The scheme domain also
+determines the factory's namespace and deployment salt: `keccak256("p2id.vault.v1")`.
 
 The constants of every scheme are in [`sdks/node/src/p2id.json`](sdks/node/src/p2id.json), keyed
-by domain. Entries are history: once a scheme's factory is recorded it is frozen, the build fails
-if the vault bytecode no longer matches it, and the fix is to add the next scheme and make it
-`current`. Older schemes are never removed, so an address issued under one can always be derived
-and claimed.
+by domain. Once a factory is recorded, the scheme entry is immutable; the build rejects vault
+bytecode that does not match its recorded hash. Changes require a new scheme entry and an
+update to `current`. Older entries must remain available for address derivation and claims
+under their original schemes.
 
 ### Example
 
@@ -65,11 +64,11 @@ identityHash = SHA-256( "p2id.identity.v1" ‖ 0x00 ‖ "test-9988@privy.io" )
              = 0xbcda0f09fa9732b2bfdea38199486b654a84e8e06085d7e364af8137f8d7deaf
 
 factory           = 0x1111111111111111111111111111111111111111      (illustrative)
-vaultInitCodeHash = 0xee9e754a61e88c528c790b17d279033c4750ae71c1e2dd07133e4a2009e6ce5c
-p2id              = 0x59ed1B4a2C6c62621d8dfCf31a9b4c0Ab8cC4D02
+vaultInitCodeHash = 0xe77177c8928780958d3dd9349c9e58ed44081f738fb54dec4e46d043aad778d5
+p2id              = 0xA6aAdfCFEfaD0761490178BD639DBD1f3f895C90
 ```
 
-The preimage, byte for byte (35 bytes here):
+The identity-hash preimage is 35 bytes:
 
 ```
 70 32 69 64 2e 69 64 65 6e 74 69 74 79 2e 76 31          "p2id.identity.v1"     16 bytes
@@ -77,10 +76,13 @@ The preimage, byte for byte (35 bytes here):
 74 65 73 74 2d 39 39 38 38 40 70 72 69 76 79 2e 69 6f    "test-9988@privy.io"   18 bytes
 ```
 
-`typeId` is a single raw byte: `0x00` for email, `0x05` for github_oauth, `0x0c` for wallet. It is
-not the ASCII digit (`"0"` would be `0x30`), not padded to 32 bytes as ABI encoding would, and
-there is no separator or length prefix anywhere. In Solidity this is
-`sha256(abi.encodePacked("p2id.identity.v1", uint8(typeId), value))`.
+`typeId` is encoded as one raw byte: `0x00` for email, `0x05` for github_oauth and `0x0c` for
+wallet. The preimage contains no ABI padding, separators or length prefixes. In Solidity,
+with `v` already normalised:
+
+```solidity
+sha256(abi.encodePacked("p2id.identity.v1", uint8(typeId), v))
+```
 
 With the SDK:
 
@@ -91,8 +93,8 @@ const to = await p2idAddress({ identityType: 'email', identityValue: 'you@exampl
 
 ## Identity types
 
-The identity is the pair (type, value). The value alone is only a string: `octocat` on GitHub and
-`octocat` on TikTok are different people, and the type keeps their addresses apart.
+An identity is the pair `(type, value)`. Identical values under different types produce
+distinct commitments and addresses; for example, GitHub `octocat` and TikTok `octocat`.
 
 | Id | Type (Privy `linked_accounts[].type`) | Value field | Example value | Lowercased |
 | ---: | --- | --- | --- | :---: |
@@ -110,62 +112,65 @@ The identity is the pair (type, value). The value alone is only a string: `octoc
 | 11 | `farcaster` | `username` | `dwr` | yes |
 | 12 | `wallet` | `address` | `0xA01b…0f98`, or a base58 address | only `0x…` |
 
-Notes on values:
+Value conventions:
 
 - Handles are written without a leading `@`. Phone numbers are in E.164 form with the `+`, exactly
   as Privy stores them.
-- The same email under `email`, `google_oauth`, `linkedin_oauth` and `apple_oauth` is four
-  different identities, because they are four different ways of having verified it. A payer
-  chooses which one they are paying.
+- The same email under `email`, `google_oauth`, `linkedin_oauth` and `apple_oauth` represents
+  four distinct identities. The payer must select the intended type.
 - EVM wallet addresses are hashed as their lowercase `0x…` hex string. Base58 (Solana) addresses
   are case-sensitive and are hashed as they are.
 
-### Why a numeric id and not the name
+### Type identifiers
 
-- **Names change, numbers do not.** If `twitter_oauth` becomes `x_oauth`, a name-based hash would
-  move every such address. With an id, the name is only a label: type 3 stays type 3.
-- **One spelling.** `twitter`, `Twitter`, `X` and `twitter_oauth` would be four hashes for one
-  account. A number has one form. SDKs accept the friendly name and map it to the id before hashing.
-- **Fixed width.** One byte needs no separator between type and value, so there is no parsing
-  ambiguity and no delimiter to escape.
-- **Cheaper in the circuit**, where every hashed byte costs constraints.
+Numeric identifiers keep commitments stable when platform names or SDK aliases change.
+SDKs map supported names to identifiers before hashing. The one-byte encoding provides an
+unambiguous type boundary and reduces hashing constraints in the circuit.
 
-### Rules for this table
-
-The table is part of the protocol and is **append-only**: a new platform gets the next id, and an
-existing id is never reassigned or reused, even if a platform disappears. It is defined in
+The type table is **append-only**. New types receive the next identifier; existing identifiers
+must never be reassigned or reused, including those of discontinued platforms. The table is defined in
 [`circuit/src/identity.nr`](circuit/src/identity.nr) and mirrored in
 [`contracts/src/lib/PviumHash.sol`](contracts/src/lib/PviumHash.sol),
 [`sdks/node/src/identity.ts`](sdks/node/src/identity.ts) and
 [`http-prover/src/identity.ts`](http-prover/src/identity.ts).
 
-## Chain-agnostic
+## Chains and environments
 
-Nothing in the formula names a chain. The factory is deployed through the deterministic deployment
-proxy (`contracts/scripts/deploy-deterministic.ts`, salted with the scheme domain), so it has one address on every EVM chain, and
-so does every identity's vault. A vault must still be deployed on each chain where it is claimed;
-anyone can do that with `factory.deploy(identityHash)`, and tokens sent to the address beforehand
-are claimable once it is. Chains whose CREATE2 rule differs from Ethereum's (zkSync Era) are not
-covered.
+Address derivation contains no chain identifier. The factory uses the deterministic deployment
+proxy (`contracts/scripts/deploy-deterministic.ts`) with the scheme's deployment salt. Within
+one scheme and environment, identical factory addresses and vault bytecode produce identical
+vault addresses across supported chains. Chains with different CREATE2 semantics are outside
+the scope of this specification.
 
-Pvium runs two environments, each a separate stack with its own factory: `production` on mainnets
-and `sandbox` on testnets, backed by different Privy apps. The same identity therefore has one
-production address and one sandbox address; SDKs default to production.
+A vault must be deployed on each chain before funds can be claimed. Anyone may call
+`factory.deploy(identityHash)`; tokens transferred before deployment remain at the derived address.
 
-## Claiming
+Pvium defines two environments with separate factories and Privy apps: `production` for mainnets
+and `sandbox` for testnets. Each identity has a separate address in each environment for a given
+scheme. SDKs default to production.
 
-1. The owner signs in with Privy; the prover turns their identity token into a proof that the
-   token, signed by Privy's key, contains a linked account of that type and value and a linked
-   wallet, without revealing the token or the value.
-2. The proof is presented to the vault under the verifier the deposit was made with, one the
-   factory's policy allows.
-   The verifier checks the proof is for this vault's identity hash and returns the wallet that the
-   circuit read out of the signed token; the vault pays that wallet.
-3. A newer proof retires every older one for that vault, so moving to a new wallet is one call.
+## Claims and policy
 
-Rules and fees come from the factory's policy, which can change only through a public timelock.
-The vault bounds it: a fee is at most 1% of a payout, is fixed when a deposit is made, is never
-charged on a refund, and a policy can never redirect a payout to anyone but the proven wallet.
+1. The identity owner authenticates with Privy. The prover produces a proof that a token signed
+   by Privy's key contains the specified linked identity and a linked wallet. The proof does
+   not disclose the token or identity value to the verifier.
+2. The vault accepts claims through the deposit's verifier, subject to the factory's current
+   policy. The verifier checks the vault's identity commitment and resolves the wallet from
+   the signed token. The vault pays that wallet.
+3. Proof freshness is tracked per vault and verifier using the token's issue time. Presenting
+   a newer proof updates the recorded wallet and causes older proofs to be rejected under that
+   verifier. `refreshProof` permits this update without claiming funds.
+
+Direct ERC-20 transfers create no deposit record or refund right. They are claimed through the
+factory's default verifier. Recorded deposits specify a verifier and may include a constraint
+that must be satisfied to claim; unclaimed deposits can be refunded by their funder after the
+refund window.
+
+The factory's policy governs verifier eligibility and fees; policy replacement requires a
+public timelock. The vault caps fees at 1% of the gross payout and charges no fee on refunds.
+Recorded deposits fix the fee rate at funding; direct transfers use the rate at claim time.
+Policy restrictions may block claims but cannot redirect payouts away from the wallet resolved
+by the verifier.
 
 See [`contracts/README.md`](contracts/README.md) for the contracts and
 [`sdks/node/README.md`](sdks/node/README.md) for verification and address derivation in code.

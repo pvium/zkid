@@ -31,7 +31,7 @@ export interface StackParams {
   signerKeys: { x: bigint; y: bigint }[];
   /** Constraint attester; ZeroAddress disables constraints. */
   attester: string;
-  defaultChangeDelay: number;
+  policyChangeDelay: number;
   minRefundWindow: number;
   maxRefundWindow: number;
   /** Override the deployment salt (default keccak256(scheme)); only to deliberately get a separate stack. */
@@ -221,7 +221,7 @@ export async function deployStack(
       nsHash,
       policy,
       pviumVerifier,
-      p.defaultChangeDelay,
+      p.policyChangeDelay,
       p.minRefundWindow,
       p.maxRefundWindow,
     ]),
@@ -278,7 +278,7 @@ export async function checkStack(p: StackParams, a: StackAddresses, expectedVaul
   if (!same(await policy.owner(), p.owner)) fail('policy.owner', await policy.owner(), p.owner);
   if (!(await policy.isVerifierAllowed(a.pviumVerifier))) fail('default verifier allowed by the policy', false, true);
   if ((await factory.nsHash()) !== ethers.id(p.scheme)) fail('factory.nsHash', await factory.nsHash(), ethers.id(p.scheme));
-  if (Number(await factory.defaultChangeDelay()) !== p.defaultChangeDelay) fail('defaultChangeDelay', await factory.defaultChangeDelay(), p.defaultChangeDelay);
+  if (Number(await factory.policyChangeDelay()) !== p.policyChangeDelay) fail('policyChangeDelay', await factory.policyChangeDelay(), p.policyChangeDelay);
   if (expectedVaultInitCodeHash && (await factory.initCodeHash()) !== expectedVaultInitCodeHash) {
     fail('factory.initCodeHash', await factory.initCodeHash(), `${expectedVaultInitCodeHash} (sdks/node/src/p2id.json)`);
   }

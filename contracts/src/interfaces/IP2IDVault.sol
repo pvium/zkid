@@ -81,6 +81,8 @@ interface IP2IDVault {
     function defaultVerifier() external view returns (address);
     function owner(address verifier) external view returns (address);
     function latestProofIat(address verifier) external view returns (uint64);
+    /// @notice Freshness floor for direct transfers, carried across default-verifier changes.
+    function untrackedProofIat() external view returns (uint64);
     function saltCommitment() external view returns (bytes32);
     function depositCount() external view returns (uint256);
     function bucketDepositIds(address verifier, bytes32 constraint, address token) external view returns (uint256[] memory);

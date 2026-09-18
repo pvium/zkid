@@ -238,7 +238,9 @@ describe('PviumP2IdVaultFactory', function () {
     await expect(factory.cancelPolicyProposal()).to.be.revertedWithCustomError(factory, 'NothingProposed');
   });
 
-  it('the default verifier changes only through a visible timelock', async () => {
+  it('the default verifier changes only after 14 days\' public notice, at any time', async () => {
+    expect(await factory.DEFAULT_VERIFIER_DELAY()).to.equal(14n * 86400n);
+    expect(await factory.policyChangeDelay()).to.equal(7n * 86400n);
     const idv2 = await ethers.deployContract('MockIdentityVerifier');
     const V2 = await idv2.getAddress();
     await expect(factory.proposeDefaultVerifier(V2)).to.be.revertedWithCustomError(factory, 'VerifierNotApproved');
@@ -247,16 +249,15 @@ describe('PviumP2IdVaultFactory', function () {
     await expect(factory.connect(payer).proposeDefaultVerifier(V2)).to.be.revertedWithCustomError(factory, 'NotOwner');
 
     const tx = await factory.proposeDefaultVerifier(V2);
-    const rc = await tx.wait();
-    const eta = (await ethers.provider.getBlock(rc!.blockNumber))!.timestamp + 7 * DAY;
+    const eta = (await ethers.provider.getBlock((await tx.wait())!.blockNumber))!.timestamp + 14 * DAY;
     await expect(tx).to.emit(factory, 'DefaultVerifierProposed').withArgs(V2, eta);
-    expect(await factory.proposedDefaultVerifier()).to.equal(V2);
+    await time.increase(13 * DAY);
     await expect(factory.activateDefaultVerifier()).to.be.revertedWithCustomError(factory, 'TimelockNotElapsed');
-    expect(await factory.defaultVerifier()).to.equal(await idv.getAddress()); // unchanged during the delay
+    expect(await factory.defaultVerifier()).to.equal(await idv.getAddress()); // unchanged during the notice
 
-    // a revocation during the delay kills the proposal in effect
+    // a revocation during the notice kills the proposal in effect
     await policy.approveVerifier(V2, false);
-    await time.increase(7 * DAY + 1);
+    await time.increase(DAY + 1);
     await expect(factory.activateDefaultVerifier()).to.be.revertedWithCustomError(factory, 'VerifierNotApproved');
     await policy.approveVerifier(V2, true);
     await expect(factory.activateDefaultVerifier()).to.emit(factory, 'DefaultVerifierActivated').withArgs(V2);
@@ -268,9 +269,16 @@ describe('PviumP2IdVaultFactory', function () {
     await expect(factory.cancelDefaultVerifierProposal()).to.emit(factory, 'DefaultVerifierProposalCancelled');
     await expect(factory.cancelDefaultVerifierProposal()).to.be.revertedWithCustomError(factory, 'NothingProposed');
 
-    // vaults follow the factory: fund() and untracked funds now use V2, old deposits keep V
+    // no expiry on the ability to change: a year later it still works, still with 14 days' notice
+    await time.increase(365 * DAY);
+    await factory.proposeDefaultVerifier(await idv.getAddress());
+    await time.increase(14 * DAY);
+    await factory.activateDefaultVerifier();
+    expect(await factory.defaultVerifier()).to.equal(await idv.getAddress());
+
+    // vaults follow the factory
     const vault = await ethers.getContractAt('P2IDVault', await factory.deploy.staticCall(ID));
     await factory.deploy(ID);
-    expect(await vault.defaultVerifier()).to.equal(V2);
+    expect(await vault.defaultVerifier()).to.equal(await idv.getAddress());
   });
 });

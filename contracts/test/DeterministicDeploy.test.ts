@@ -25,7 +25,7 @@ describe('Deterministic deployment: chain-agnostic P2ID addresses', function () 
         { x: GX, y: GY },
       ],
       attester: '0x0000000000000000000000000000000000000A77',
-      defaultChangeDelay: 7 * DAY,
+      policyChangeDelay: 7 * DAY,
       minRefundWindow: DAY,
       maxRefundWindow: 90 * DAY,
     };

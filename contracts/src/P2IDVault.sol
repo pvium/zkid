@@ -24,7 +24,11 @@ import {IP2IdVaultFactory} from "./interfaces/IP2IdVaultFactory.sol";
 ///        - refunds never pay a fee and never consult the policy;
 ///        - the policy can gate which verifiers are usable (freezing claims under a disallowed
 ///          one), but cannot redirect a payout: every claim still pays the wallet the verifier
-///          resolved for this vault's identity.
+///          resolved for this vault's identity. Claims through the factory's current default
+///          verifier can never be frozen: direct transfers have no refund path, so the only thing
+///          that may change who receives them is a default-verifier change with 14 days' notice.
+///          (The policy still gates *funding* under the default, so a revoked default takes no
+///          new deposits.)
 ///
 ///      Verifiers. Every deposit names the IP2IDVerifier whose proofs can release it, chosen by
 ///      the payer among those the policy allows (fund() takes the factory default). Every claim
@@ -44,6 +48,14 @@ import {IP2IdVaultFactory} from "./interfaces/IP2IdVaultFactory.sol";
 ///      owner proof, so presenting a proof for a new wallet retires every older proof. Funds
 ///      already inside before that reset are not protected: reset immediately after a wallet
 ///      compromise.
+///
+///      Direct transfers follow the factory's default verifier, which governance can change after 14
+///      days' public notice. So that a change cannot bring back a wallet the owner has already moved away from,
+///      direct transfers have their own freshness floor, `untrackedProofIat`: the newest proof
+///      presented through whichever verifier was the default at the time. It carries across a
+///      default change, and direct transfers are paid only to a default-verifier owner whose proof
+///      is at least that fresh. Only the default verifier (chosen by governance, under the
+///      timelock) can raise it, so a verifier payers merely opted into cannot affect it.
 ///
 ///      Invariant kept by every path: token balance >= trackedTotal[token] + feesOwedTotal[token].
 contract P2IDVault is IP2IDVault {
@@ -66,6 +78,9 @@ contract P2IDVault is IP2IDVault {
     mapping(address verifier => address) public owner;
     /// @notice Issue time of that proof. Older proofs are refused under that verifier on every path.
     mapping(address verifier => uint64) public latestProofIat;
+    /// @notice Freshness floor for direct transfers: the newest proof presented through the verifier
+    ///         that was the default at the time. Carries across default changes.
+    uint64 public untrackedProofIat;
 
     /// @notice All deposits ever made, by id.
     Deposit[] public deposits;
@@ -266,6 +281,7 @@ contract P2IDVault is IP2IDVault {
     function sweepUntracked(address token) external nonReentrant returns (uint256 amount) {
         address verifier = defaultVerifier();
         address to = _ownerOf(verifier);
+        if (latestProofIat[verifier] < untrackedProofIat) revert ProofTooOld();
         uint256 gross = _untrackedBalance(token);
         uint256 fee = (gross * _quoteFeeBps(verifier, token)) / BPS;
         uint256 charged;
@@ -371,7 +387,7 @@ contract P2IDVault is IP2IDVault {
     ///         unconsumed default deposit under `verifier`, plus untracked funds when it is the default verifier.
     function sweepable(address verifier, address token) external view returns (uint256) {
         uint256 amount = bucketTotal[verifier][bytes32(0)][token];
-        if (verifier == defaultVerifier()) amount += _untrackedBalance(token);
+        if (_paysUntracked(verifier)) amount += _untrackedBalance(token);
         return amount;
     }
 
@@ -390,7 +406,7 @@ contract P2IDVault is IP2IDVault {
         address verifier,
         bytes calldata proof,
         IP2IDVerifier.Constraint memory constraint
-    ) private onlyAllowed(verifier) returns (address wallet) {
+    ) private onlyClaimable(verifier) returns (address wallet) {
         uint64 iat;
         (wallet, iat) = IP2IDVerifier(verifier).getIdentityWallet(saltCommitment, proof, constraint);
         if (wallet == address(0)) revert InvalidWallet();
@@ -401,6 +417,7 @@ contract P2IDVault is IP2IDVault {
             latestProofIat[verifier] = iat;
             emit OwnerRefreshed(verifier, wallet, iat);
         }
+        if (iat > untrackedProofIat && verifier == defaultVerifier()) untrackedProofIat = iat;
         // iat == latest with the owner set: same-age proof (a replayed copy, or another wallet
         // slot of the same token); the owner stays, and constrained paths pay `wallet`.
     }
@@ -415,8 +432,14 @@ contract P2IDVault is IP2IDVault {
         return _present(verifier, proof, constraint);
     }
 
-    /// @dev Owner wallet for proof-less default sweeps; the verifier must still be allowed.
-    function _ownerOf(address verifier) private view onlyAllowed(verifier) returns (address to) {
+    /// @dev Direct transfers go to `verifier`'s owner only if it is the current default and its
+    ///      owner proof is at least as fresh as the newest proof any default has seen.
+    function _paysUntracked(address verifier) private view returns (bool) {
+        return verifier == defaultVerifier() && latestProofIat[verifier] >= untrackedProofIat;
+    }
+
+    /// @dev Owner wallet for proof-less default sweeps; the verifier must still be claimable.
+    function _ownerOf(address verifier) private view onlyClaimable(verifier) returns (address to) {
         to = owner[verifier];
         if (to == address(0)) revert OwnerNotInitialized();
     }
@@ -434,7 +457,7 @@ contract P2IDVault is IP2IDVault {
         returns (uint256 amount, uint256 consumed)
     {
         address to = owner[verifier];
-        uint256 untracked = verifier == defaultVerifier() ? _untrackedBalance(token) : 0;
+        uint256 untracked = _paysUntracked(verifier) ? _untrackedBalance(token) : 0;
         uint256 gross;
         uint256 fee;
         (gross, fee, consumed) = _consumeFromCursor(verifier, bytes32(0), token, depositCountLimit, to);
@@ -577,9 +600,16 @@ contract P2IDVault is IP2IDVault {
 
     // ------------------------------------------------------------------ modifiers
 
-    /// @dev The factory's policy decides which verifiers deposits may be funded under and claimed through.
+    /// @dev Funding: the policy decides which verifiers new deposits may be made under.
     modifier onlyAllowed(address verifier) {
         if (!_policy().isVerifierAllowed(verifier)) revert VerifierNotApproved(verifier);
+        _;
+    }
+
+    /// @dev Claiming: through the factory's current default verifier always (see the contract
+    ///      notes), otherwise only while the policy allows the verifier.
+    modifier onlyClaimable(address verifier) {
+        if (verifier != defaultVerifier() && !_policy().isVerifierAllowed(verifier)) revert VerifierNotApproved(verifier);
         _;
     }
 

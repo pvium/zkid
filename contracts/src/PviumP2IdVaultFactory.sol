@@ -14,12 +14,13 @@ import {P2IDVault} from "./P2IDVault.sol";
 ///         anywhere from two constants. Funds sent to that address before deployment are swept
 ///         by the owner after deployment (see P2IDVault: bare transfers are untracked and irrevocable).
 /// @dev Everything expected to evolve is in the policy (IP2IDPolicy), so this factory and the vault
-///      code, which fix every P2ID address, never have to change. Both the policy and the default
-///      verifier (used by fund() and for bare transfers) move only through a timelock: propose,
-///      wait `defaultChangeDelay`, activate. A compromised owner can therefore only announce
-///      changes that stay visible on chain for the whole delay; what a policy can do even then is
-///      bounded by the vault (fee cap, fees fixed at funding, no fee on refunds, never redirecting
-///      a payout).
+///      code, which fix every P2ID address, never have to change. Both move only through a
+///      timelock (propose, wait, activate): the policy after `policyChangeDelay`, the default
+///      verifier after DEFAULT_VERIFIER_DELAY, a fixed 14 days. Direct transfers follow the default
+///      verifier and have no refund path, so a change to it gets the longer notice: anyone who
+///      objects can sweep first, and the vault guarantees nothing can freeze their claim meanwhile.
+///      What a policy can do is bounded by the vault (fee cap, fees fixed at funding, no fee on
+///      refunds, never redirecting a payout, never blocking claims through the default verifier).
 contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     bytes32 public immutable nsHash;
     uint64 public immutable minRefundWindow;
@@ -34,8 +35,10 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     /// @notice Verifier used when a payer does not choose one. Changes only via the timelock below.
     address public defaultVerifier;
 
-    /// @notice Delay between proposing a change (policy or default verifier) and being able to activate it.
-    uint64 public immutable defaultChangeDelay;
+    /// @notice Notice before a proposed default verifier can be activated. Fixed in this bytecode.
+    uint64 public constant DEFAULT_VERIFIER_DELAY = 14 days;
+    /// @notice Notice before a proposed policy can be activated.
+    uint64 public immutable policyChangeDelay;
     address public proposedDefaultVerifier;
     /// @notice Earliest time the proposed default can be activated; 0 when nothing is proposed.
     uint64 public proposedDefaultEta;
@@ -69,7 +72,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         bytes32 _nsHash,
         address _policy,
         address _defaultVerifier,
-        uint64 _defaultChangeDelay,
+        uint64 _policyChangeDelay,
         uint64 _minRefundWindow,
         uint64 _maxRefundWindow
     ) {
@@ -80,7 +83,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         owner = _owner;
         emit OwnershipTransferred(address(0), _owner);
         nsHash = _nsHash;
-        defaultChangeDelay = _defaultChangeDelay;
+        policyChangeDelay = _policyChangeDelay;
         minRefundWindow = _minRefundWindow;
         maxRefundWindow = _maxRefundWindow;
         policy = _policy;
@@ -91,12 +94,12 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
 
     // ------------------------------------------------------------------ policy (timelocked)
 
-    /// @notice Announce a new policy. Takes effect only after `defaultChangeDelay`, via
+    /// @notice Announce a new policy. Takes effect only after `policyChangeDelay`, via
     ///         activatePolicy(). Replaces any pending policy proposal.
     function proposePolicy(address newPolicy) external onlyOwner {
         if (newPolicy.code.length == 0) revert InvalidPolicy();
         proposedPolicy = newPolicy;
-        proposedPolicyEta = uint64(block.timestamp) + defaultChangeDelay;
+        proposedPolicyEta = uint64(block.timestamp) + policyChangeDelay;
         emit PolicyProposed(newPolicy, proposedPolicyEta);
     }
 
@@ -124,11 +127,12 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     // ------------------------------------------------------------------ default verifier (timelocked)
 
     /// @notice Announce a new default verifier (must be allowed by the policy). Takes effect only
-    ///         after `defaultChangeDelay`, via activateDefaultVerifier(). Replaces any pending proposal.
+    ///         after DEFAULT_VERIFIER_DELAY (14 days), via activateDefaultVerifier(). Replaces any
+    ///         pending proposal.
     function proposeDefaultVerifier(address verifier) external onlyOwner {
         if (!IP2IDPolicy(policy).isVerifierAllowed(verifier)) revert VerifierNotApproved(verifier);
         proposedDefaultVerifier = verifier;
-        proposedDefaultEta = uint64(block.timestamp) + defaultChangeDelay;
+        proposedDefaultEta = uint64(block.timestamp) + DEFAULT_VERIFIER_DELAY;
         emit DefaultVerifierProposed(verifier, proposedDefaultEta);
     }
 

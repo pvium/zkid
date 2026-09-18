@@ -51,15 +51,19 @@ yarn fixtures   # after re-proving in ../circuit: refresh test fixtures + regene
   fees; `withdrawFees(verifier, token)`, callable by anyone, approves the current policy for exactly
   the owed amount and calls its `distributeFee`, which pulls and splits it (e.g. between a
   verifier's operator and the protocol); refunds never pay a fee or consult the policy; a policy can disallow a verifier (freezing claims under it) but can
-  never redirect a payout. Constrained deposits are refused under a verifier whose
+  never redirect a payout, nor block claims through the current default verifier (it can still
+  stop new deposits under it). Constrained deposits are refused under a verifier whose
   `supportsConstraints()` is false. Each claimed deposit emits `Claimed`.
 - `src/interfaces/IP2IDPolicy.sol`, `src/PviumP2IDPolicy.sol` — what is expected to evolve:
   which verifiers are allowed, what fee applies, and how collected fees are distributed. The launch policy is an owner-managed
   allowlist with no fee. Permissionless, stake-based verifier registration and protocol fees are
   later policies; switching to one never changes the vault or any address.
 - `src/PviumP2IdVaultFactory.sol` — deploys vaults with CREATE2 salted by identity hash, and
-  points them at the current policy and default verifier. Both change only through a timelock
-  (`proposePolicy` / `proposeDefaultVerifier`, wait `defaultChangeDelay`, `activate…`), so a
+  points them at the current policy and default verifier. Both change only through a timelock:
+  the policy after `policyChangeDelay` (7 days by default), the default verifier after a fixed
+  14 days (`DEFAULT_VERIFIER_DELAY`), since direct transfers follow it and have no refund path.
+  The vault never lets the policy freeze claims through the current default, so during that
+  notice anyone can sweep. So a
   compromised owner can only announce changes that stay visible on chain for the whole delay. An
   identity's vault address is `keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(P2IDVault creationCode))`
   (`vaultFor`, `initCodeHash`), so payers can derive it offline and pay before the vault exists.

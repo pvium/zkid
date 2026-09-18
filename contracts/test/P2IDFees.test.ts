@@ -183,13 +183,22 @@ describe('P2IDVault fees and policy limits', function () {
       .to.be.revertedWithCustomError(vault, 'ConstraintsUnsupported');
   });
 
-  it('gating is the one thing a policy controls outright: disallowing freezes claims, refunds still work', async () => {
-    const d = await fund(1_000n);
-    await vault.refreshProof(V, proofFor(ownerWallet.address, 1000));
-    await policy.allow(V, false);
-    await expect(vault.sweep(V, await token.getAddress(), 0)).to.be.revertedWithCustomError(vault, 'VerifierNotApproved');
+  it('gating: disallowing a non-default verifier freezes claims under it (refunds still work); the default cannot be frozen', async () => {
+    const other = await ethers.deployContract('MockIdentityVerifier');
+    const O = await other.getAddress();
+    await policy.allow(O, true);
+    const d = await fund(1_000n, Z, O);
+    await vault.refreshProof(O, proofFor(ownerWallet.address, 1000));
+    await policy.allow(O, false);
+    await expect(vault.sweep(O, await token.getAddress(), 0)).to.be.revertedWithCustomError(vault, 'VerifierNotApproved');
     await time.increase(DAY + 1);
     await vault.connect(payer).refund(d);
     expect(await token.balanceOf(payer.address)).to.equal(1_000n);
+
+    await fund(500n); // under the default
+    await vault.refreshProof(V, proofFor(ownerWallet.address, 1000));
+    await policy.allow(V, false);
+    await vault.sweep(V, await token.getAddress(), 0); // still claimable
+    expect(await token.balanceOf(ownerWallet.address)).to.equal(500n);
   });
 });

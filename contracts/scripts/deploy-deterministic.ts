@@ -9,7 +9,7 @@
 //   PRIVY_JWKS_URL_SANDBOX / _PROD   the Privy app's JWKS (URL, or a path to a saved jwks.json)
 //   OWNER_SANDBOX / _PROD            factory registry owner (a Safe at the same address everywhere)
 //   ATTESTER_SANDBOX / _PROD         constraint attester, or "none"
-// Shared, optional: DEPLOYER_KEY (or DEPLOYER_KEY_<SUFFIX>), DEFAULT_CHANGE_DELAY, MIN_REFUND_WINDOW,
+// Shared, optional: DEPLOYER_KEY (or DEPLOYER_KEY_<SUFFIX>), POLICY_CHANGE_DELAY, MIN_REFUND_WINDOW,
 // MAX_REFUND_WINDOW, SCHEME (default: `current` in sdks/node/src/p2id.json), CIRCUIT_VERSION.
 //
 // PREDICT=1 prints the addresses without sending anything (with no --network, set P2ID_ENV).
@@ -104,7 +104,7 @@ async function configFor(environment: P2IDEnvironment, scheme: string, circuitVe
     circuitVersion,
     signerKeys: keys.map(({ x, y }) => ({ x, y })),
     attester,
-    defaultChangeDelay: num('DEFAULT_CHANGE_DELAY', 7 * DAY),
+    policyChangeDelay: num('POLICY_CHANGE_DELAY', 7 * DAY),
     minRefundWindow: num('MIN_REFUND_WINDOW', DAY),
     maxRefundWindow: num('MAX_REFUND_WINDOW', 90 * DAY),
   };
@@ -140,7 +140,7 @@ async function main() {
       owner: params.owner,
       attester: params.attester,
       circuitVersion: params.circuitVersion,
-      defaultChangeDelay: params.defaultChangeDelay,
+      policyChangeDelay: params.policyChangeDelay,
       minRefundWindow: params.minRefundWindow,
       maxRefundWindow: params.maxRefundWindow,
     },
