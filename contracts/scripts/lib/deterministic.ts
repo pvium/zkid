@@ -21,9 +21,11 @@ export interface StackParams {
    */
   scheme: string;
   circuitVersion: number;
-  /** Privy signing key, raw P-256 coordinates. */
-  signerX: bigint;
-  signerY: bigint;
+  /**
+   * Every key in the Privy app's JWKS, raw P-256 coordinates. Order does not matter: the stack
+   * sorts them, so the same set always gives the same addresses.
+   */
+  signerKeys: { x: bigint; y: bigint }[];
   /** Constraint attester; ZeroAddress disables constraints. */
   attester: string;
   defaultChangeDelay: number;
@@ -68,21 +70,68 @@ export function predictAddress(initCode: string, salt: string): string {
   );
 }
 
-/** Deploy `initCode` through the proxy (no-op if already deployed); returns the address. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Whether `address` has code, tolerating load-balanced RPCs (e.g. the public Base endpoints) whose
+ * backends lag behind each other: "no code" is only believed after several reads agree.
+ */
+export async function hasCode(address: string, opts: { reads?: number; delayMs?: number } = {}): Promise<boolean> {
+  // The in-process Hardhat chain has a single consistent state: one read is exact.
+  const reads = network.name === 'hardhat' ? 1 : (opts.reads ?? 3);
+  for (let i = 0; i < reads; i++) {
+    if ((await ethers.provider.getCode(address)) !== '0x') return true;
+    if (i < reads - 1) await sleep(opts.delayMs ?? 1500);
+  }
+  return false;
+}
+
+export type DeployLog = (message: string) => void;
+
+/**
+ * Deploy `initCode` through the proxy (no-op if already deployed); returns the address.
+ * With `signer === null` nothing is sent: the address is only predicted.
+ *
+ * Safe to re-run after a partial failure: an existing contract is detected and skipped, and a
+ * deployment whose "already there?" read was stale is caught by simulating the call first (the
+ * proxy reverts when the address is taken).
+ */
 export async function deployDeterministic(
   initCode: string,
   salt: string,
-  signer: Signer,
+  signer: Signer | null,
+  opts: { name?: string; log?: DeployLog } = {},
 ): Promise<string> {
   const address = predictAddress(initCode, salt);
-  if ((await ethers.provider.getCode(address)) !== '0x') return address;
-  const tx = await signer.sendTransaction({
-    to: DETERMINISTIC_DEPLOYER,
-    data: ethers.concat([salt, initCode]),
-  });
-  await tx.wait();
-  if ((await ethers.provider.getCode(address)) === '0x')
-    throw new Error(`deployment to ${address} failed`);
+  if (signer === null) return address;
+  const name = opts.name ?? address;
+  const log = opts.log ?? (() => {});
+  if (await hasCode(address, { reads: 1 })) {
+    log(`${name.padEnd(14)} ${address}  already deployed, skipped`);
+    return address;
+  }
+  const request = { to: DETERMINISTIC_DEPLOYER, data: ethers.concat([salt, initCode]) };
+  try {
+    await signer.call(request);
+  } catch (err) {
+    // The proxy reverts when CREATE2 fails, and the usual reason is that the address is taken:
+    // the first read was stale. Look again, patiently, before treating it as a real failure.
+    if (await hasCode(address, { reads: 5, delayMs: 2000 })) {
+      log(`${name.padEnd(14)} ${address}  already deployed, skipped`);
+      return address;
+    }
+    throw new Error(`deploying ${name} to ${address} would revert: ${(err as Error).message}`);
+  }
+  const tx = await signer.sendTransaction(request);
+  log(`${name.padEnd(14)} ${address}  deploying, tx ${tx.hash}`);
+  const receipt = await tx.wait();
+  if (!receipt || receipt.status !== 1) throw new Error(`deploying ${name}: transaction ${tx.hash} reverted`);
+  // A successful proxy call means the contract exists (the proxy reverts otherwise). Wait until the
+  // RPC shows it, so later steps and the final checks read consistent state.
+  if (!(await hasCode(address, { reads: 20, delayMs: 3000 }))) {
+    throw new Error(`deploying ${name}: ${tx.hash} succeeded but ${address} still shows no code after 60s; re-run to continue`);
+  }
+  log(`${name.padEnd(14)} ${address}  deployed`);
   return address;
 }
 
@@ -99,12 +148,21 @@ async function initCodeOf(
   return tx.data as string;
 }
 
+/**
+ * The addresses the stack will have, computed offline: no transactions, no network needed. Use it
+ * to fill in `factory` in sdks/node/src/p2id.json, or to check a chain before deploying to it.
+ */
+export function predictStack(p: StackParams): Promise<StackAddresses> {
+  return deployStack(p, null);
+}
+
 /** Deploy (or find) the whole stack. Same params + same build = same addresses on every chain. */
 export async function deployStack(
   p: StackParams,
-  signer: Signer,
+  signer: Signer | null,
+  log?: DeployLog,
 ): Promise<StackAddresses> {
-  await ensureDeterministicDeployer();
+  if (signer !== null) await ensureDeterministicDeployer();
   if (!/^p2id\.vault\.v[1-9][0-9]*$/.test(p.scheme)) throw new Error(`bad scheme "${p.scheme}" (expected p2id.vault.vN)`);
   const nsHash = ethers.id(p.scheme);
   const salt = p.salt ?? nsHash;
@@ -112,11 +170,13 @@ export async function deployStack(
     await initCodeOf('RelationsLib', []),
     salt,
     signer,
+    { name: 'relationsLib', log },
   );
   const transcriptLib = await deployDeterministic(
     await initCodeOf('ZKTranscriptLib', []),
     salt,
     signer,
+    { name: 'transcriptLib', log },
   );
   const zkVerifier = await deployDeterministic(
     await initCodeOf('PviumZKVerifier', [], {
@@ -125,21 +185,25 @@ export async function deployStack(
     }),
     salt,
     signer,
+    { name: 'zkVerifier', log },
   );
+  const keys = sortedKeys(p.signerKeys);
   const pviumIdentity = await deployDeterministic(
     await initCodeOf('PviumIdentity', [
       zkVerifier,
       p.circuitVersion,
-      p.signerX,
-      p.signerY,
+      keys.map((k) => k.x),
+      keys.map((k) => k.y),
     ]),
     salt,
     signer,
+    { name: 'pviumIdentity', log },
   );
   const pviumVerifier = await deployDeterministic(
     await initCodeOf('PviumVerifier', [pviumIdentity, p.attester]),
     salt,
     signer,
+    { name: 'pviumVerifier', log },
   );
   const factory = await deployDeterministic(
     await initCodeOf('PviumP2IdVaultFactory', [
@@ -152,6 +216,7 @@ export async function deployStack(
     ]),
     salt,
     signer,
+    { name: 'factory', log },
   );
   return {
     relationsLib,
@@ -161,4 +226,45 @@ export async function deployStack(
     pviumVerifier,
     factory,
   };
+}
+
+/** For each contract of the stack, whether it already has code on the current network. */
+export async function stackStatus(a: StackAddresses): Promise<Record<keyof StackAddresses, boolean>> {
+  const out = {} as Record<keyof StackAddresses, boolean>;
+  for (const [name, address] of Object.entries(a) as [keyof StackAddresses, string][]) out[name] = await hasCode(address, { reads: 2 });
+  return out;
+}
+
+/** Canonical order for a key set (by x, then y), so JWKS ordering can never move an address. */
+export function sortedKeys(keys: { x: bigint; y: bigint }[]): { x: bigint; y: bigint }[] {
+  if (keys.length === 0) throw new Error('at least one Privy signing key is required');
+  return [...keys].sort((a, b) => (a.x === b.x ? (a.y < b.y ? -1 : a.y > b.y ? 1 : 0) : a.x < b.x ? -1 : 1));
+}
+
+/** Read back a deployed stack and fail loudly if anything is not wired as configured. */
+export async function checkStack(p: StackParams, a: StackAddresses, expectedVaultInitCodeHash?: string): Promise<void> {
+  const fail = (what: string, got: unknown, want: unknown) => {
+    throw new Error(`deployment check failed: ${what} is ${got}, expected ${want}`);
+  };
+  const same = (x: string, y: string) => x.toLowerCase() === y.toLowerCase();
+  for (const [name, address] of Object.entries(a)) {
+    if (!(await hasCode(address, { reads: 5, delayMs: 2000 }))) fail(`${name} code at ${address}`, 'empty', 'deployed');
+  }
+  const identity = await ethers.getContractAt('PviumIdentity', a.pviumIdentity);
+  if (!same(await identity.verifier(), a.zkVerifier)) fail('PviumIdentity.verifier', await identity.verifier(), a.zkVerifier);
+  if (Number(await identity.circuitVersion()) !== p.circuitVersion) fail('circuitVersion', await identity.circuitVersion(), p.circuitVersion);
+  if (Number(await identity.signerKeyCount()) !== p.signerKeys.length) fail('signerKeyCount', await identity.signerKeyCount(), p.signerKeys.length);
+  for (const k of p.signerKeys) if (!(await identity.isSignerKey(k.x, k.y))) fail(`signer key ${k.x.toString(16).slice(0, 12)}…`, 'missing', 'accepted');
+  const verifier = await ethers.getContractAt('PviumVerifier', a.pviumVerifier);
+  if (!same(await verifier.pviumIdentity(), a.pviumIdentity)) fail('PviumVerifier.pviumIdentity', await verifier.pviumIdentity(), a.pviumIdentity);
+  if (!same(await verifier.constraintSigner(), p.attester)) fail('constraintSigner', await verifier.constraintSigner(), p.attester);
+  const factory = await ethers.getContractAt('PviumP2IdVaultFactory', a.factory);
+  if (!same(await factory.owner(), p.owner)) fail('factory.owner', await factory.owner(), p.owner);
+  if (!same(await factory.defaultVerifier(), a.pviumVerifier)) fail('factory.defaultVerifier', await factory.defaultVerifier(), a.pviumVerifier);
+  if (!(await factory.approvedVerifiers(a.pviumVerifier))) fail('default verifier approval', false, true);
+  if ((await factory.nsHash()) !== ethers.id(p.scheme)) fail('factory.nsHash', await factory.nsHash(), ethers.id(p.scheme));
+  if (Number(await factory.defaultChangeDelay()) !== p.defaultChangeDelay) fail('defaultChangeDelay', await factory.defaultChangeDelay(), p.defaultChangeDelay);
+  if (expectedVaultInitCodeHash && (await factory.initCodeHash()) !== expectedVaultInitCodeHash) {
+    fail('factory.initCodeHash', await factory.initCodeHash(), `${expectedVaultInitCodeHash} (sdks/node/src/p2id.json)`);
+  }
 }

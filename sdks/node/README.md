@@ -106,7 +106,10 @@ import { p2idAddress, identityHash } from '@pvium/zkid';
 const to = await p2idAddress({ identityType: 'email', identityValue: 'you@example.com' });
 const salt = await identityHash('email', 'you@example.com'); // the vault's CREATE2 salt / commitment
 
-// against another factory (a test deployment, a fork)
+// the sandbox stack (testnets, sandbox Privy app) has its own factory and addresses
+const test = await p2idAddress({ identityType: 'email', identityValue: 'you@example.com', environment: 'sandbox' });
+
+// against another factory (a local deployment, a fork)
 const t = await p2idAddress({ identityType: 'github_oauth', identityValue: 'octocat', factory: '0xFactory…' });
 ```
 
@@ -118,7 +121,8 @@ at one address on every chain, which is why no chain id appears anywhere above.
 
 The constants come from an address **scheme**, named by a domain: `P2ID_SCHEME` is the current one
 (`p2id.vault.v1`) and `P2ID_SCHEMES` holds every scheme this release knows, each with its
-`identityDomain`, `vaultInitCodeHash` and `factory`. A change to the vault ships as the next
+`identityDomain`, `vaultInitCodeHash` and a factory per environment (`production`, the default, and
+`sandbox`). A change to the vault ships as the next
 scheme; older ones stay, so an address issued earlier can still be derived by passing
 `scheme: 'p2id.vault.v1'`.
 

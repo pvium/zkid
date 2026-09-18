@@ -148,6 +148,10 @@ anyone can do that with `factory.deploy(identityHash)`, and tokens sent to the a
 are claimable once it is. Chains whose CREATE2 rule differs from Ethereum's (zkSync Era) are not
 covered.
 
+Pvium runs two environments, each a separate stack with its own factory: `production` on mainnets
+and `sandbox` on testnets, backed by different Privy apps. The same identity therefore has one
+production address and one sandbox address; SDKs default to production.
+
 ## Claiming
 
 1. The owner signs in with Privy; the prover turns their identity token into a proof that the

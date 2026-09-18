@@ -2,6 +2,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
 import { IdentityType, identityHash as hashIdentity, toHex } from './identity.js';
 import { resolveIdentityType, type IdentityTypeName } from './identityNames.js';
 import { P2ID_SCHEME, P2ID_SCHEMES, type P2IDScheme, type P2IDSchemeName } from './p2idConstants.js';
+import type { PviumEnvironmentName } from './environments.js';
 
 export { P2ID_SCHEME, P2ID_SCHEMES };
 export type { P2IDScheme, P2IDSchemeName };
@@ -19,6 +20,10 @@ export type { P2IDScheme, P2IDSchemeName };
  * chain-agnostic, like any wallet address. (The vault contract still has to be deployed on each
  * chain where it is claimed; anyone can do that, and funds sent before then are claimable once
  * it is.)
+ *
+ * Each Pvium environment is its own stack: `production` (mainnets, the production Privy app) and
+ * `sandbox` (testnets, the sandbox Privy app) have different factories, so the same identity has
+ * a different address in each. Production is the default.
  *
  * Schemes are history. A change to the vault bytecode moves every address, so it ships as the
  * next scheme and becomes `P2ID_SCHEME`; earlier schemes stay in `P2ID_SCHEMES` so addresses
@@ -47,6 +52,8 @@ export interface P2IDAddressInput {
   identityValue: string;
   /** Address scheme; defaults to the current one (`P2ID_SCHEME`). Pass an older one to find an address issued under it. */
   scheme?: P2IDSchemeName | string;
+  /** Pvium environment; defaults to `production`. Use `sandbox` on testnets. */
+  environment?: PviumEnvironmentName;
   /** Derive against another factory than the scheme's (e.g. a test deployment). */
   factory?: `0x${string}`;
 }
@@ -54,17 +61,21 @@ export interface P2IDAddressInput {
 /** The P2ID address for an identity: where to pay it, on any EVM chain, deployed or not. Checksummed. */
 export async function p2idAddress(input: P2IDAddressInput): Promise<`0x${string}`> {
   const salt = await identityHash(input.identityType, input.identityValue, input.scheme);
-  return p2idAddressForHash(salt, { scheme: input.scheme, factory: input.factory });
+  return p2idAddressForHash(salt, { scheme: input.scheme, environment: input.environment, factory: input.factory });
 }
 
 /** Same, from an identity hash you already have (e.g. from an attestation's claim). */
 export function p2idAddressForHash(
   identityHash: `0x${string}`,
-  opts: { scheme?: P2IDSchemeName | string; factory?: `0x${string}` } = {},
+  opts: { scheme?: P2IDSchemeName | string; environment?: PviumEnvironmentName; factory?: `0x${string}` } = {},
 ): `0x${string}` {
   const scheme = p2idScheme(opts.scheme);
-  const factory = opts.factory ?? scheme.factory;
-  if (!factory) throw new Error(`scheme ${opts.scheme ?? P2ID_SCHEME} has no factory address in this release yet; pass \`factory\` explicitly`);
+  const environment = opts.environment ?? 'production';
+  if (environment !== 'production' && environment !== 'sandbox') throw new Error(`unknown environment "${environment}"`);
+  const factory = opts.factory ?? scheme.factories[environment];
+  if (!factory) {
+    throw new Error(`scheme ${opts.scheme ?? P2ID_SCHEME} has no ${environment} factory address in this release yet; pass \`factory\` explicitly`);
+  }
   if (!/^0x[0-9a-fA-F]{40}$/.test(factory)) throw new Error(`bad factory address ${factory}`);
   const preimage = new Uint8Array(1 + 20 + 32 + 32);
   preimage[0] = 0xff;

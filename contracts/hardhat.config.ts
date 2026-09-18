@@ -1,5 +1,20 @@
 import { HardhatUserConfig } from 'hardhat/config';
 import '@nomicfoundation/hardhat-toolbox';
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { DEPLOY_NETWORKS, envFor } from './deploy.config';
+
+// Deployment settings come from contracts/.env (git-ignored; see .env.example). Tests need none.
+const envFile = join(__dirname, '.env');
+if (existsSync(envFile)) (process as any).loadEnvFile?.(envFile);
+
+// One Hardhat network per entry in deploy.config.ts, each paying from its environment's deployer.
+const deployNetworks = Object.fromEntries(
+  Object.entries(DEPLOY_NETWORKS).map(([name, n]) => {
+    const key = envFor('DEPLOYER_KEY', n.environment, { shared: true });
+    return [name, { url: process.env[n.rpcEnv] ?? n.defaultRpc, chainId: n.chainId, accounts: key ? [key] : [] }];
+  }),
+);
 
 const config: HardhatUserConfig = {
   paths: {
@@ -22,7 +37,10 @@ const config: HardhatUserConfig = {
     hardhat: {
       chainId: 31337,
     },
+    ...deployNetworks,
   },
+  etherscan: { apiKey: process.env.ETHERSCAN_API_KEY ?? '' },
+  sourcify: { enabled: false },
 };
 
 export default config;

@@ -4,6 +4,7 @@ Zero-knowledge circuits and proof tooling for Pvium.
 
 **[P2ID.md](P2ID.md)** is the protocol specification: how an identity (email, social handle, phone,
 wallet) maps to a chain-agnostic address, the identity type ids, and how a claim works.
+**[DEPLOYMENT.md](DEPLOYMENT.md)** is the runbook: contracts, prover, SDK and API, in order.
 
 | Folder | Purpose |
 | --- | --- |

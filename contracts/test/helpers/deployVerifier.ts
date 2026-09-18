@@ -19,9 +19,16 @@ export async function deployVerifier() {
   return { verifier, relations, transcript };
 }
 
-/** Deploys PviumIdentity bound to a verifier and a registered signer key. */
-export async function deployIdentityProof(verifierAddress: string, signerX: bigint, signerY: bigint, circuitVersion = 2) {
-  const proof = await ethers.deployContract('PviumIdentity', [verifierAddress, circuitVersion, signerX, signerY]);
+/** Deploys PviumIdentity bound to a verifier and one signer key (or pass `extraKeys` for a key set). */
+export async function deployIdentityProof(
+  verifierAddress: string,
+  signerX: bigint,
+  signerY: bigint,
+  circuitVersion = 2,
+  extraKeys: { x: bigint; y: bigint }[] = [],
+) {
+  const keys = [{ x: signerX, y: signerY }, ...extraKeys];
+  const proof = await ethers.deployContract('PviumIdentity', [verifierAddress, circuitVersion, keys.map((k) => k.x), keys.map((k) => k.y)]);
   await proof.waitForDeployment();
   return proof;
 }

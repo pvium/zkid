@@ -1,0 +1,33 @@
+{
+  "scheme": "p2id.vault.v1",
+  "environment": "sandbox",
+  "privyJwks": "https://auth.privy.io/api/v1/apps/cmhc6t92u001tju0cxkxg34on/jwks.json",
+  "privyKeys": [
+    {
+      "kid": "Lp_q4NY6tg5jSdiD790AIm01JR7GIJ_xmDVZZ6MVAfM",
+      "x": "0x487140ed4fa91d71559b5e015286c9b76c270883f59a5ae9febac9b291584cd1",
+      "y": "0xd4cf5625205d28cbe6c8108a695929208c08f3bdc7790ab7023abe17dcdefc04"
+    },
+    {
+      "kid": "1NtmKuIrWxOltnhgo5yNIyuFFmi-cQDW1Ucqv2185Og",
+      "x": "0x84e87db1d90fb3ef5079e6fbe8a50e8f2aee7f8ad66c13b837cc93e016e2b9aa",
+      "y": "0x27a0949bf003bb64d5a622a05737d2547efa8980267daf35cc75276cb30c9de5"
+    }
+  ],
+  "config": {
+    "owner": "0x59fD8f94dDd1Fe6066d300F74afD5E3a01970e43",
+    "attester": "0x0000000000000000000000000000000000000000",
+    "circuitVersion": 2,
+    "defaultChangeDelay": 604800,
+    "minRefundWindow": 86400,
+    "maxRefundWindow": 7776000
+  },
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "relationsLib": "0x905d26249c677214a801BaFa4d1F076CE818c970",
+  "transcriptLib": "0x32AF91C59E2A21B608C81cc2759f5ccE8a64C5b1",
+  "zkVerifier": "0x548c561f21DAc415Ef502743B382D73D10A0c027",
+  "pviumIdentity": "0x2821488Cd8AaE5aEe6Db34442307C486c5BEdDD4",
+  "pviumVerifier": "0xC72ce5609087d4AA3BA6A493b78d02a4108A8ED0",
+  "factory": "0xBc04b221874B2C442ccf885aDFc00F4B2eB4C954"
+}

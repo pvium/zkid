@@ -16,9 +16,9 @@ yarn fixtures   # after re-proving in ../circuit: refresh test fixtures + regene
   It is split into `PviumZKVerifier` (bb emits it as `HonkVerifier`; the refresh script renames it) plus two external libraries (`RelationsLib`, `ZKTranscriptLib`)
   that must be deployed first and linked; `test/helpers/deployVerifier.ts` does this.
 - `src/PviumIdentity.sol` — the contract Pvium deploys per chain **per (circuit version, Privy
-  signing key)**, fully immutable and ownerless. Its constructor takes the Honk verifier, the
-  circuit version (`circuit/version.json`) and the signer's raw P-256 public key `(x, y)`
-  (Privy's app verification key), checks the point is on the curve, and stores them. A key
+  key set)**, fully immutable and ownerless. Its constructor takes the Honk verifier, the
+  circuit version (`circuit/version.json`) and the raw P-256 coordinates of every key in the
+  Privy app's JWKS, checks each point is on the curve, and stores the set (`isSignerKey`). A key
   rotation or a new circuit build is a new deployment (and a new `PviumVerifier`) that the vault
   factory registers alongside the old one; no key can ever be added to an existing deployment,
   so no admin key can forge proofs. `circuitVersion()` lets a caller confirm they hold the
@@ -93,11 +93,17 @@ because the whole stack is deployed with CREATE2 through the deterministic deplo
 bytecode, its constructor arguments and a salt, never on the deployer or a nonce:
 
 ```sh
-OWNER=0xMultisig ATTESTER=0xAttester PRIVY_PEM=test/fixtures/privy_es256_public.pem \
-  npx hardhat run scripts/deploy-deterministic.ts --network <name>
+npx hardhat run scripts/deploy-deterministic.ts --network baseSepolia   # sandbox
+npx hardhat run scripts/deploy-deterministic.ts --network base          # production
 ```
 
-Run it once per chain **with identical values**. It deploys the two Honk libraries,
+The network decides the Pvium environment (`deploy.config.ts`), and the script reads only that
+environment's settings from `contracts/.env`: `PRIVY_JWKS_URL_SANDBOX` / `_PROD`, `OWNER_…`,
+`ATTESTER_…`. The Privy key set comes from the JWKS, so `PviumIdentity` accepts every key the app
+may sign with.
+
+The full runbook, including configuration, prediction, verification and what to do afterwards, is
+in [DEPLOYMENT.md](../DEPLOYMENT.md). Run it once per chain **with identical values**. It deploys the two Honk libraries,
 `PviumZKVerifier`, `PviumIdentity`, `PviumVerifier` and `PviumP2IdVaultFactory`, skips anything
 already deployed, and prints the addresses. Record `factory` under the scheme (`p2id.vault.v1`) in
 `sdks/node/src/p2id.json`, which freezes that scheme; the SDK then derives every identity's address

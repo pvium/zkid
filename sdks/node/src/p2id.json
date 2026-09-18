@@ -4,7 +4,10 @@
     "p2id.vault.v1": {
       "identityDomain": "p2id.identity.v1",
       "vaultInitCodeHash": "0xedeb17b2cad352aa707895e12dddf28ba5ced700b2feaf31d26c3ee221d84768",
-      "factory": null,
+      "factories": {
+        "production": null,
+        "sandbox": null
+      },
       "compiler": {
         "solc": "0.8.28",
         "optimizerRuns": 200,
@@ -13,5 +16,5 @@
       }
     }
   },
-  "notes": "One entry per P2ID address scheme, keyed by its domain (p2id.vault.vN). A scheme fixes every address: p2id = CREATE2(factory, identityHash, vaultInitCodeHash), with identityHash computed under identityDomain. The scheme domain is also the factory's namespace (nsHash = keccak256(domain)) and the deterministic-deployment salt, so it is an input to the addresses, not only a label. Entries are history: once `factory` is recorded the entry is frozen, and a vault change means adding p2id.vault.v(N+1) and moving `current`; older schemes stay derivable forever. While `factory` is null, `node scripts/embed-p2id.mjs --update` refreshes vaultInitCodeHash from the Hardhat artifact."
+  "notes": "One entry per P2ID address scheme, keyed by its domain (p2id.vault.vN). A scheme fixes every address: p2id = CREATE2(factory, identityHash, vaultInitCodeHash), with identityHash computed under identityDomain. Each Pvium environment is a separate stack with its own factory: `production` (mainnets) and `sandbox` (testnets); within an environment the factory has one address on every chain. The scheme domain is also the factory's namespace (nsHash = keccak256(domain)) and the deterministic-deployment salt. Entries are history: once any factory is recorded the entry is frozen, and a vault change means adding p2id.vault.v(N+1) and moving `current`; older schemes stay derivable forever. While no factory is recorded, `node scripts/embed-p2id.mjs --update` refreshes vaultInitCodeHash from the Hardhat artifact."
 }

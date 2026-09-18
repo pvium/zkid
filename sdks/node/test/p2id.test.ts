@@ -35,12 +35,24 @@ test('p2idAddress reproduces CREATE2 exactly as the factory computes it', async 
   assert.notEqual(p2idAddressForHash(EMAIL_COMMITMENT, { factory: '0x2222222222222222222222222222222222222222' }), EXPECTED);
 });
 
-test('the address takes no chain: one factory everywhere, and a missing one fails loudly', async () => {
-  if (p2idScheme().factory === null) {
-    await assert.rejects(p2idAddress({ identityType: 'email', identityValue: 'test-9988@privy.io' }), /has no factory address in this release yet/);
-  } else {
-    assert.equal(await p2idAddress({ identityType: 'email', identityValue: 'test-9988@privy.io' }), p2idAddressForHash(EMAIL_COMMITMENT));
+test('the address takes no chain: one factory per environment, and a missing one fails loudly', async () => {
+  for (const environment of ['production', 'sandbox'] as const) {
+    const recorded = p2idScheme().factories[environment];
+    const call = p2idAddress({ identityType: 'email', identityValue: 'test-9988@privy.io', environment });
+    if (recorded === null) {
+      await assert.rejects(call, new RegExp(`has no ${environment} factory address in this release yet`));
+    } else {
+      assert.equal(await call, p2idAddressForHash(EMAIL_COMMITMENT, { environment }));
+    }
   }
+  // production is the default
+  if (p2idScheme().factories.production === null) {
+    await assert.rejects(p2idAddress({ identityType: 'email', identityValue: 'test-9988@privy.io' }), /no production factory/);
+  }
+  await assert.rejects(
+    p2idAddress({ identityType: 'email', identityValue: 'a@b.c', environment: 'staging' as any, factory: FACTORY }),
+    /unknown environment "staging"/,
+  );
   assert.throws(() => p2idAddressForHash(EMAIL_COMMITMENT, { factory: '0x1234' as `0x${string}` }), /bad factory address/);
   await assert.rejects(p2idAddress({ identityType: 'email', identityValue: 'a@b.c', scheme: 'p2id.vault.v2', factory: FACTORY }), /unknown P2ID scheme/);
 });

@@ -193,16 +193,30 @@ describe('PviumIdentity', function () {
     publicInputs = loadPublicInputs();
   });
 
-  it('stores the registered signer key raw; nothing is updatable', async () => {
+  it('stores the accepted signer key set; nothing is updatable', async () => {
     const { x, y } = sampleSignerKey();
     const gate = await deployIdentityProof(verifierAddress, x, y);
-    expect(await gate.signerX()).to.equal(x);
-    expect(await gate.signerY()).to.equal(y);
+    expect(await gate.isSignerKey(x, y)).to.equal(true);
+    expect(await gate.signerKeyCount()).to.equal(1n);
     expect(await gate.verifier()).to.equal(verifierAddress);
     expect(await gate.circuitVersion()).to.equal(2n);
     for (const fn of ['configure', 'addSignerKey', 'addCircuit', 'owner', 'transferOwnership']) {
       expect((gate as any)[fn], fn).to.equal(undefined);
     }
+  });
+
+  it('accepts a proof signed by any key in the set, and refuses empty or duplicate sets', async () => {
+    const { x, y } = sampleSignerKey();
+    const gx = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n; // P-256 generator: a valid point
+    const gy = 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n;
+    // the Privy JWKS lists several keys; the token's key may be any of them, in any position
+    const gate = await deployIdentityProof(verifierAddress, gx, gy, 2, [{ x, y }]);
+    expect(await gate.signerKeyCount()).to.equal(2n);
+    expect((await gate.verifyAttestation(proof, publicInputs)).iat).to.equal(1789240094n);
+    const factory = await ethers.getContractFactory('PviumIdentity');
+    await expect(factory.deploy(verifierAddress, 2, [], [])).to.be.revertedWithCustomError(factory, 'NoSignerKeys');
+    await expect(factory.deploy(verifierAddress, 2, [x], [])).to.be.revertedWithCustomError(factory, 'NoSignerKeys');
+    await expect(factory.deploy(verifierAddress, 2, [x, x], [y, y])).to.be.revertedWithCustomError(factory, 'DuplicateSignerKey');
   });
 
   it('refuses circuit version 0', async () => {

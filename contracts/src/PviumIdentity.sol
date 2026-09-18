@@ -7,10 +7,12 @@ import {PviumHash} from "./lib/PviumHash.sol";
 
 /// @title PviumIdentity
 /// @notice On-chain verifier for Pvium attestations. Fully immutable: one deployment per
-///         (circuit version, Privy signing key), with no owner and nothing to update. A Privy key
-///         rotation or a new circuit build is a new deployment (plus a new PviumVerifier), which
-///         the P2ID vault factory registers alongside the old one; nobody can ever add a key that
-///         forges proofs to an existing deployment. Developers call it through IPviumIdentity.
+///         (circuit version, Privy key set), with no owner and nothing to update. The key set is
+///         the Privy app's JWKS at deployment time (Privy publishes more than one key per app and
+///         may sign with any of them); it is fixed in the constructor and can never grow. A Privy
+///         key rotation or a new circuit build is a new deployment (plus a new PviumVerifier),
+///         which the P2ID vault factory registers alongside the old one; nobody can ever add a key
+///         that forges proofs to an existing deployment. Developers call it through IPviumIdentity.
 /// @dev Public input layout emitted by circuit/src/main.nr:
 ///        [0] identity_type   [1] wallet (EVM address checked in-circuit against the token; 0 if none)
 ///        [2] signer_x_hi     [3] signer_x_lo     [4] signer_y_hi   [5] signer_y_lo
@@ -24,9 +26,10 @@ contract PviumIdentity is IPviumIdentity {
     IVerifier public immutable verifier;
     /// @notice Circuit version this deployment verifies (see circuit/version.json). One deployment per version.
     uint16 public immutable circuitVersion;
-    /// @notice Registered signer public key, uncompressed P-256 coordinates.
-    uint256 public immutable signerX;
-    uint256 public immutable signerY;
+    /// @notice Number of accepted signer keys (fixed at construction).
+    uint256 public immutable signerKeyCount;
+    /// @dev Accepted signer keys, keyed by signerKeyHash(x, y). Written only by the constructor.
+    mapping(bytes32 keyHash => bool) private _signerKeys;
 
     /// @notice Everything an attestation asserts, for Pvium's own contracts (e.g. vault claims
     ///         that pay `wallet`). Developers should use the IPviumIdentity functions.
@@ -48,20 +51,38 @@ contract PviumIdentity is IPviumIdentity {
     error UnknownSigner(bytes32 x, bytes32 y);
     error WrongPublicInputCount(uint256 got);
     error InvalidPublicKey();
+    error NoSignerKeys();
+    error DuplicateSignerKey(uint256 x, uint256 y);
     error InvalidCircuitVersion();
     error IdentityTypeMismatch(uint8 expected, uint8 got);
     error IdentityMismatch();
     error NoWallet();
     error WalletMismatch();
 
-    constructor(IVerifier _verifier, uint16 _circuitVersion, uint256 _signerX, uint256 _signerY) {
+    /// @param _signerXs/_signerYs Raw P-256 coordinates of every key the Privy app signs with.
+    constructor(IVerifier _verifier, uint16 _circuitVersion, uint256[] memory _signerXs, uint256[] memory _signerYs) {
         if (address(_verifier).code.length == 0) revert InvalidVerifier();
-        if (!_isOnCurve(_signerX, _signerY)) revert InvalidPublicKey();
         if (_circuitVersion == 0) revert InvalidCircuitVersion();
+        if (_signerXs.length == 0 || _signerXs.length != _signerYs.length) revert NoSignerKeys();
+        for (uint256 i = 0; i < _signerXs.length; i++) {
+            (uint256 x, uint256 y) = (_signerXs[i], _signerYs[i]);
+            if (!_isOnCurve(x, y)) revert InvalidPublicKey();
+            bytes32 h = signerKeyHash(x, y);
+            if (_signerKeys[h]) revert DuplicateSignerKey(x, y);
+            _signerKeys[h] = true;
+        }
         verifier = _verifier;
         circuitVersion = _circuitVersion;
-        signerX = _signerX;
-        signerY = _signerY;
+        signerKeyCount = _signerXs.length;
+    }
+
+    /// @inheritdoc IPviumIdentity
+    function isSignerKey(uint256 x, uint256 y) public view returns (bool) {
+        return _signerKeys[signerKeyHash(x, y)];
+    }
+
+    function signerKeyHash(uint256 x, uint256 y) public pure returns (bytes32) {
+        return keccak256(abi.encode(x, y));
     }
 
     // ---- developer-facing ---------------------------------------------------------------
@@ -106,7 +127,7 @@ contract PviumIdentity is IPviumIdentity {
     // ---- lower level ----------------------------------------------------------------------
 
     /// @notice Verify a proof and return everything it asserts. Reverts unless the proof is valid
-    ///         and was produced from a token signed by the registered key.
+    ///         and was produced from a token signed by one of the accepted keys.
     function verifyAttestation(bytes calldata proof, bytes32[] calldata publicInputs)
         public
         view
@@ -139,7 +160,7 @@ contract PviumIdentity is IPviumIdentity {
         if (publicInputs.length != PUBLIC_INPUT_COUNT) revert WrongPublicInputCount(publicInputs.length);
         bytes32 x = _join(publicInputs[2], publicInputs[3]);
         bytes32 y = _join(publicInputs[4], publicInputs[5]);
-        if (uint256(x) != signerX || uint256(y) != signerY) revert UnknownSigner(x, y);
+        if (!isSignerKey(uint256(x), uint256(y))) revert UnknownSigner(x, y);
         a.identityType = uint8(uint256(publicInputs[0]));
         a.wallet = address(uint160(uint256(publicInputs[1])));
         a.iat = uint64(uint256(publicInputs[6]));
