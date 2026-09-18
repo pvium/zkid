@@ -1,5 +1,5 @@
 {
-  "vaultInitCodeHash": "0x9bb9f157d3bae1e87106f781b0db9e62c4ad40bbcfc52f02590fffa629cd452f",
-  "factories": {},
-  "notes": "vaultInitCodeHash = keccak256(P2IDVault creation bytecode) from the Hardhat artifact (solc 0.8.28, optimizer 200 runs); run `node scripts/embed-p2id.mjs --update` after any vault change. factories maps EIP-155 chain id -> deployed PviumP2IdVaultFactory address; fill in at deployment."
+  "vaultInitCodeHash": "0xedeb17b2cad352aa707895e12dddf28ba5ced700b2feaf31d26c3ee221d84768",
+  "factory": null,
+  "notes": "P2ID addresses are chain-agnostic: the whole stack is deployed through the deterministic deployment proxy (contracts/scripts/deploy-deterministic.ts), so the factory, and every identity's vault, has the same address on every EVM chain. vaultInitCodeHash = keccak256(P2IDVault creation bytecode) from the Hardhat artifact (solc 0.8.28, optimizer 200 runs, metadata.bytecodeHash none); run `node scripts/embed-p2id.mjs --update` after any vault change. factory = the PviumP2IdVaultFactory address that script prints; null until the first deployment."
 }

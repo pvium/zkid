@@ -85,6 +85,32 @@ require(block.timestamp - issuedAt < 30 days, "attestation too old");
 - `test/fixtures/` — a proof, its public inputs and the vk hash for the sample email identity,
   copied from `../circuit/target/proof_email`, plus the real sample Privy token and Privy's public key.
 
+## Deployment: one address on every chain
+
+A P2ID address is meant to work like a wallet address: the same on every EVM chain. That holds
+because the whole stack is deployed with CREATE2 through the deterministic deployment proxy
+(`0x4e59b44847b379578588920cA78FbF26c0B4956C`), so each contract's address depends only on its
+bytecode, its constructor arguments and a salt, never on the deployer or a nonce:
+
+```sh
+OWNER=0xMultisig ATTESTER=0xAttester PRIVY_PEM=test/fixtures/privy_es256_public.pem \
+  npx hardhat run scripts/deploy-deterministic.ts --network <name>
+```
+
+Run it once per chain **with identical values**. It deploys the two Honk libraries,
+`PviumZKVerifier`, `PviumIdentity`, `PviumVerifier` and `PviumP2IdVaultFactory`, skips anything
+already deployed, and prints the addresses. Record `factory` in `sdks/node/src/p2id.json`; the
+SDK then derives every identity's address from constants alone, with no chain id.
+
+- Any different parameter (owner, Privy key, attester, delays, namespace) is a different stack at
+  different addresses, so the addresses are a commitment to the configuration. The owner must be
+  an address that exists on every chain, e.g. a Safe deployed at the same address everywhere.
+- `metadata.bytecodeHash` is `none` in `hardhat.config.ts` so that a comment edit cannot move an
+  address; only a code change does. Deploy every chain from the same build.
+- A vault still has to be deployed on each chain where it is claimed (`factory.deploy`, anyone can
+  call it); funds sent to the address beforehand are claimable once it is.
+- Chains whose CREATE2 rule differs from Ethereum's (zkSync Era) get different addresses.
+
 ## Token support in P2IDVault
 
 - Fee-on-transfer tokens work: a deposit records what actually arrived, and the payee bears the

@@ -13,6 +13,9 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 200,
       },
+      // No source-metadata hash in the bytecode: a vault's address depends on keccak256 of its
+      // creation code, and that must change only when the code does, not when a comment does.
+      metadata: { bytecodeHash: 'none' },
     },
   },
   networks: {

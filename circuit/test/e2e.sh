@@ -45,15 +45,21 @@ run_case "github + ethereum wallet 5/5"   github_oauth dephizee            0xdA9
 run_case "email, wallet slot empty"       email        test-9988@privy.io ""
 run_case "wallet as the identity itself"  wallet       0x899BA183F2c55BF9C627D9Af2984fbdED2E64311 0xdA90b3C11F5AA8698F5D9356f29541D46E32840d
 
+# Replace the public `wallet` input in Prover.toml. Written without `sed -i`, whose syntax
+# differs between GNU (Linux CI) and BSD (macOS).
+set_wallet() {
+  sed "s/^wallet = .*/wallet = \"$1\"/" Prover.toml > Prover.toml.tmp && mv Prover.toml.tmp Prover.toml
+}
+
 # Negative: the public `wallet` input must equal the address read from the token.
 echo "case: wallet input differs from the wallet account (must fail)"
 python3 scripts/gen_prover.py --jwt "$(cat $F/sample_token.jwt)" --pubkey $F/privy_es256_public.pem \
   --type email --value test-9988@privy.io --wallet 0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98 -o Prover.toml >/dev/null
-sed -i '' 's/^wallet = .*/wallet = "0x899ba183f2c55bf9c627d9af2984fbded2e64311"/' Prover.toml
+set_wallet '0x899ba183f2c55bf9c627d9af2984fbded2e64311'
 if nargo execute e2e_witness >/dev/null 2>&1; then echo "  FAIL: mismatched wallet input was accepted"; exit 1; else echo "  ok   rejected"; fi
 echo "case: wallet input set for a base58 wallet (must fail)"
 python3 scripts/gen_prover.py --jwt "$(cat $F/sample_token.jwt)" --pubkey $F/privy_es256_public.pem \
   --type github_oauth --value dephizee --wallet EXnVUEeELHiYynvjoQ9YhgxfMSDJC6tJm7VkFQY2b8Wj -o Prover.toml >/dev/null
-sed -i '' 's/^wallet = .*/wallet = "0x1"/' Prover.toml
+set_wallet '0x1'
 if nargo execute e2e_witness >/dev/null 2>&1; then echo "  FAIL: non-zero wallet input for base58 wallet was accepted"; exit 1; else echo "  ok   rejected"; fi
 echo "all e2e cases passed"

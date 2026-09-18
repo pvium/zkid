@@ -12,5 +12,7 @@ cp ../circuit/test/fixtures/sample_token.jwt test/fixtures/sample_token.jwt
 cp ../circuit/test/fixtures/privy_es256_public.pem test/fixtures/privy_es256_public.pem
 bb write_solidity_verifier -k "$SRC/vk" -o src/PviumZKVerifier.sol
 # bb names the contract HonkVerifier; we ship it as PviumZKVerifier.
-sed -i '' 's|^contract HonkVerifier is BaseZKHonkVerifier|contract PviumZKVerifier is BaseZKHonkVerifier|' src/PviumZKVerifier.sol
+# (no `sed -i`: its syntax differs between GNU and BSD sed)
+sed 's|^contract HonkVerifier is BaseZKHonkVerifier|contract PviumZKVerifier is BaseZKHonkVerifier|' src/PviumZKVerifier.sol > src/PviumZKVerifier.sol.tmp
+mv src/PviumZKVerifier.sol.tmp src/PviumZKVerifier.sol
 echo "fixtures and verifier refreshed"
