@@ -3,7 +3,7 @@
   "schemes": {
     "p2id.vault.v1": {
       "identityDomain": "p2id.identity.v1",
-      "vaultInitCodeHash": "0xedeb17b2cad352aa707895e12dddf28ba5ced700b2feaf31d26c3ee221d84768",
+      "vaultInitCodeHash": "0xee9e754a61e88c528c790b17d279033c4750ae71c1e2dd07133e4a2009e6ce5c",
       "factories": {
         "production": null,
         "sandbox": null

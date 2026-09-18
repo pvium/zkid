@@ -7,8 +7,8 @@ import { IdentityType } from '../src/identity.js';
 const EMAIL_COMMITMENT = '0xbcda0f09fa9732b2bfdea38199486b654a84e8e06085d7e364af8137f8d7deaf';
 // Reference vector produced with ethers.getCreate2Address(factory, salt, initCodeHash) for p2id.vault.v1.
 const FACTORY = '0x1111111111111111111111111111111111111111';
-const V1_INIT_CODE_HASH = '0xedeb17b2cad352aa707895e12dddf28ba5ced700b2feaf31d26c3ee221d84768';
-const EXPECTED = '0xdFb0272b2178A35D2ad0693F51b5Dd23659C3235';
+const V1_INIT_CODE_HASH = '0xee9e754a61e88c528c790b17d279033c4750ae71c1e2dd07133e4a2009e6ce5c';
+const EXPECTED = '0x59ed1B4a2C6c62621d8dfCf31a9b4c0Ab8cC4D02';
 
 test('identityHash matches the circuit and contract fixtures, by id or by name, case-insensitively', async () => {
   assert.equal(await identityHash('email', 'test-9988@privy.io'), EMAIL_COMMITMENT);

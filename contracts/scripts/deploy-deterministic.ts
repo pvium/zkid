@@ -162,8 +162,15 @@ async function main() {
     if (record.factory.toLowerCase() !== predicted.factory.toLowerCase()) {
       const keysNow = JSON.stringify(summary.privyKeys.map((k) => k.x));
       const keysThen = JSON.stringify((record.privyKeys ?? []).map((k: any) => k.x));
-      const hint = keysNow !== keysThen ? 'the Privy JWKS keys changed since then' : 'owner, attester or delays differ';
-      throw new Error(`deployments/${file} has factory ${record.factory}; this run would give ${predicted.factory} (${hint}). Every ${environment} chain must match.`);
+      const hint =
+        keysNow !== keysThen
+          ? 'the Privy JWKS keys changed since then'
+          : JSON.stringify(record.config) !== JSON.stringify(summary.config)
+            ? 'owner, attester or delays differ'
+            : 'same configuration, so the contract code changed since that deployment. If that stack is superseded (nothing recorded in p2id.json, no funds sent to it), move the file out of deployments/ and run again';
+      const message = `deployments/${file} has factory ${record.factory}; this run would give ${predicted.factory} (${hint}). Every ${environment} chain must match.`;
+      if (isLocal()) console.log(`warning: ${message}`);
+      else throw new Error(message);
     }
   }
 

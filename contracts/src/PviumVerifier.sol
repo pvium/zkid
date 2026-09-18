@@ -74,6 +74,11 @@ contract PviumVerifier is IP2IDVerifier {
         return (a.wallet, a.iat);
     }
 
+    /// @inheritdoc IP2IDVerifier
+    function supportsConstraints() external view returns (bool) {
+        return constraintSigner != address(0);
+    }
+
     /// @notice The EIP-712 digest `constraintSigner` signs for a commitment.
     function constraintDigest(bytes32 commitment) public view returns (bytes32) {
         return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), keccak256(abi.encode(CONSTRAINT_TYPEHASH, commitment))));

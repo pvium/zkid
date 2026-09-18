@@ -2,53 +2,60 @@
 pragma solidity ^0.8.27;
 
 import {IP2IdVaultFactory} from "./interfaces/IP2IdVaultFactory.sol";
+import {IP2IDPolicy} from "./interfaces/IP2IDPolicy.sol";
 import {P2IDVault} from "./P2IDVault.sol";
 
 /// @title PviumP2IdVaultFactory
-/// @notice Deploys P2IDVaults with CREATE2, salted by identity hash, and keeps the registry of
-///         verifiers a payer may fund a deposit under. A vault takes no constructor arguments
+/// @notice Deploys P2IDVaults with CREATE2, salted by identity hash, and points them at the
+///         current policy (which verifiers are allowed, what capped fee applies) and default verifier. A vault takes no constructor arguments
 ///         (the factory calls `initialize` right after `new`), so its creation code is a constant
 ///         and an identity's vault address is
 ///         `keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(creationCode))`, computable
 ///         anywhere from two constants. Funds sent to that address before deployment are swept
 ///         by the owner after deployment (see P2IDVault: bare transfers are untracked and irrevocable).
-/// @dev Verifiers are added to the registry, never replaced: each deposit records the verifier it
-///      was funded under and stays claimable through it (while approved) or refundable. Pvium's
-///      own verifiers are immutable per (circuit version, Privy key), so a rotation or a new
-///      circuit is a new verifier registered here. The default verifier (used by fund() and for
-///      bare transfers) moves only through a timelock: propose, wait `defaultChangeDelay`,
-///      activate. A compromised owner can therefore add verifiers payers must opt into, revoke
-///      verifiers (freezing claims, never moving funds), or announce a default change that stays
-///      visible on chain for the whole delay before it takes effect.
+/// @dev Everything expected to evolve is in the policy (IP2IDPolicy), so this factory and the vault
+///      code, which fix every P2ID address, never have to change. Both the policy and the default
+///      verifier (used by fund() and for bare transfers) move only through a timelock: propose,
+///      wait `defaultChangeDelay`, activate. A compromised owner can therefore only announce
+///      changes that stay visible on chain for the whole delay; what a policy can do even then is
+///      bounded by the vault (fee cap, fees fixed at funding, no fee on refunds, never redirecting
+///      a payout).
 contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     bytes32 public immutable nsHash;
     uint64 public immutable minRefundWindow;
     uint64 public immutable maxRefundWindow;
 
-    /// @notice Admin of the verifier registry (a Pvium multisig). Two-step transfer.
+    /// @notice Proposes and activates policy / default-verifier changes (a Pvium multisig). Two-step transfer.
     address public owner;
     address public pendingOwner;
 
+    /// @notice The policy every vault consults. Changes only via the timelock below.
+    address public policy;
     /// @notice Verifier used when a payer does not choose one. Changes only via the timelock below.
     address public defaultVerifier;
-    mapping(address verifier => bool) public approvedVerifiers;
 
-    /// @notice Delay between proposing a new default verifier and being able to activate it.
+    /// @notice Delay between proposing a change (policy or default verifier) and being able to activate it.
     uint64 public immutable defaultChangeDelay;
     address public proposedDefaultVerifier;
     /// @notice Earliest time the proposed default can be activated; 0 when nothing is proposed.
     uint64 public proposedDefaultEta;
+    address public proposedPolicy;
+    /// @notice Earliest time the proposed policy can be activated; 0 when nothing is proposed.
+    uint64 public proposedPolicyEta;
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
     event DefaultVerifierProposed(address indexed verifier, uint64 eta);
     event DefaultVerifierProposalCancelled(address indexed verifier);
     event DefaultVerifierActivated(address indexed verifier);
+    event PolicyProposed(address indexed policy, uint64 eta);
+    event PolicyProposalCancelled(address indexed policy);
+    event PolicyActivated(address indexed policy);
 
     error NotOwner();
     error NotPendingOwner();
     error InvalidOwner();
-    error InvalidVerifier();
+    error InvalidPolicy();
     error VerifierNotApproved(address verifier);
     error NothingProposed();
     error TimelockNotElapsed(uint64 eta);
@@ -60,6 +67,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     constructor(
         address _owner,
         bytes32 _nsHash,
+        address _policy,
         address _defaultVerifier,
         uint64 _defaultChangeDelay,
         uint64 _minRefundWindow,
@@ -67,32 +75,58 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     ) {
         if (_owner == address(0)) revert InvalidOwner();
         if (_minRefundWindow > _maxRefundWindow) revert InvalidRefundWindow();
+        if (_policy.code.length == 0) revert InvalidPolicy();
+        if (!IP2IDPolicy(_policy).isVerifierAllowed(_defaultVerifier)) revert VerifierNotApproved(_defaultVerifier);
         owner = _owner;
         emit OwnershipTransferred(address(0), _owner);
         nsHash = _nsHash;
         defaultChangeDelay = _defaultChangeDelay;
         minRefundWindow = _minRefundWindow;
         maxRefundWindow = _maxRefundWindow;
-        _approveVerifier(_defaultVerifier, true);
+        policy = _policy;
+        emit PolicyActivated(_policy);
         defaultVerifier = _defaultVerifier;
         emit DefaultVerifierActivated(_defaultVerifier);
     }
 
-    // ------------------------------------------------------------------ registry (owner)
+    // ------------------------------------------------------------------ policy (timelocked)
 
-    /// @notice Approve (or revoke) a verifier. Revoking freezes claims on deposits funded under it
-    ///         until it is re-approved; those deposits stay refundable.
-    function approveVerifier(
-        address verifier,
-        bool approved
-    ) external onlyOwner {
-        _approveVerifier(verifier, approved);
+    /// @notice Announce a new policy. Takes effect only after `defaultChangeDelay`, via
+    ///         activatePolicy(). Replaces any pending policy proposal.
+    function proposePolicy(address newPolicy) external onlyOwner {
+        if (newPolicy.code.length == 0) revert InvalidPolicy();
+        proposedPolicy = newPolicy;
+        proposedPolicyEta = uint64(block.timestamp) + defaultChangeDelay;
+        emit PolicyProposed(newPolicy, proposedPolicyEta);
     }
 
-    /// @notice Announce a new default verifier (must be approved). Takes effect only after
-    ///         `defaultChangeDelay`, via activateDefaultVerifier(). Replaces any pending proposal.
+    function cancelPolicyProposal() external onlyOwner {
+        if (proposedPolicyEta == 0) revert NothingProposed();
+        emit PolicyProposalCancelled(proposedPolicy);
+        delete proposedPolicy;
+        delete proposedPolicyEta;
+    }
+
+    /// @notice Switch every vault to the proposed policy once the delay has elapsed. The new policy
+    ///         must allow the current default verifier, so bare transfers stay claimable.
+    function activatePolicy() external onlyOwner {
+        uint64 eta = proposedPolicyEta;
+        if (eta == 0) revert NothingProposed();
+        if (block.timestamp < eta) revert TimelockNotElapsed(eta);
+        address newPolicy = proposedPolicy;
+        if (!IP2IDPolicy(newPolicy).isVerifierAllowed(defaultVerifier)) revert VerifierNotApproved(defaultVerifier);
+        delete proposedPolicy;
+        delete proposedPolicyEta;
+        policy = newPolicy;
+        emit PolicyActivated(newPolicy);
+    }
+
+    // ------------------------------------------------------------------ default verifier (timelocked)
+
+    /// @notice Announce a new default verifier (must be allowed by the policy). Takes effect only
+    ///         after `defaultChangeDelay`, via activateDefaultVerifier(). Replaces any pending proposal.
     function proposeDefaultVerifier(address verifier) external onlyOwner {
-        if (!approvedVerifiers[verifier]) revert VerifierNotApproved(verifier);
+        if (!IP2IDPolicy(policy).isVerifierAllowed(verifier)) revert VerifierNotApproved(verifier);
         proposedDefaultVerifier = verifier;
         proposedDefaultEta = uint64(block.timestamp) + defaultChangeDelay;
         emit DefaultVerifierProposed(verifier, proposedDefaultEta);
@@ -105,14 +139,14 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         delete proposedDefaultEta;
     }
 
-    /// @notice Make the proposed verifier the default once the delay has elapsed. The proposal
-    ///         must still be approved (a revocation in the meantime cancels it in effect).
+    /// @notice Make the proposed verifier the default once the delay has elapsed. The policy must
+    ///         still allow it (a revocation in the meantime cancels it in effect).
     function activateDefaultVerifier() external onlyOwner {
         uint64 eta = proposedDefaultEta;
         if (eta == 0) revert NothingProposed();
         if (block.timestamp < eta) revert TimelockNotElapsed(eta);
         address verifier = proposedDefaultVerifier;
-        if (!approvedVerifiers[verifier]) revert VerifierNotApproved(verifier);
+        if (!IP2IDPolicy(policy).isVerifierAllowed(verifier)) revert VerifierNotApproved(verifier);
         delete proposedDefaultVerifier;
         delete proposedDefaultEta;
         defaultVerifier = verifier;
@@ -246,12 +280,6 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
             constraint,
             refundWindow
         );
-    }
-
-    function _approveVerifier(address verifier, bool approved) private {
-        if (verifier.code.length == 0) revert InvalidVerifier();
-        approvedVerifiers[verifier] = approved;
-        emit VerifierApprovalSet(verifier, approved);
     }
 
     function _callToken(address token, bytes memory input) private {

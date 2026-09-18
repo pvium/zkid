@@ -48,7 +48,8 @@ describe('PviumVerifier: real ZK proof + signed constraint commitment', function
 
   beforeEach(async () => {
     token = await ethers.deployContract('MockERC20');
-    factory = await ethers.deployContract('PviumP2IdVaultFactory', [admin.address, NS, await verifier.getAddress(), 7 * DAY, DAY, 30 * DAY]);
+    const policy = await ethers.deployContract('PviumP2IDPolicy', [admin.address, [await verifier.getAddress(), await verifierNoSigner.getAddress()]]);
+    factory = await ethers.deployContract('PviumP2IdVaultFactory', [admin.address, NS, await policy.getAddress(), await verifier.getAddress(), 7 * DAY, DAY, 30 * DAY]);
     await factory.deploy(EMAIL_COMMITMENT);
     vault = await ethers.getContractAt('P2IDVault', await factory.vaultFor(EMAIL_COMMITMENT));
   });
@@ -123,6 +124,17 @@ describe('PviumVerifier: real ZK proof + signed constraint commitment', function
   it('the constraint signer is immutable: a new attester is a new verifier deployment', async () => {
     expect((verifier as any).setConstraintSigner).to.equal(undefined);
     expect(await verifier.constraintSigner()).to.equal(attester.address);
+  });
+
+  it('supportsConstraints reflects whether an attester is set, and a vault refuses constrained deposits otherwise', async () => {
+    expect(await verifier.supportsConstraints()).to.equal(true);
+    expect(await verifierNoSigner.supportsConstraints()).to.equal(false);
+    await token.mint(payer.address, 10n);
+    await token.connect(payer).approve(await vault.getAddress(), 10n);
+    const commitment = await verifier.screeningCommitment(POLICY, EMAIL_COMMITMENT);
+    await expect(vault.connect(payer).fundWith(await verifierNoSigner.getAddress(), await token.getAddress(), 10n, commitment, DAY))
+      .to.be.revertedWithCustomError(vault, 'ConstraintsUnsupported');
+    await vault.connect(payer).fundWith(await verifierNoSigner.getAddress(), await token.getAddress(), 10n, ethers.ZeroHash, DAY); // unconstrained is fine
   });
 
   it('a verifier without a constraint signer refuses constrained sweeps but still proves identity', async () => {

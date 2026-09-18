@@ -29,4 +29,9 @@ interface IP2IDVerifier {
         bytes calldata proof,
         Constraint calldata constraint
     ) external view returns (address wallet, uint64 iat);
+
+    /// @notice Whether this verifier can ever satisfy a non-zero constraint. Vaults refuse
+    ///         constrained deposits under a verifier that returns false (or does not implement
+    ///         this), so a payer cannot lock funds behind a condition nobody can meet.
+    function supportsConstraints() external view returns (bool);
 }

@@ -3,16 +3,14 @@ pragma solidity ^0.8.27;
 
 /// @title IP2IdVaultFactory
 /// @notice Deploys one P2IDVault per identity at an address anyone can derive offline from the
-///         identity hash, and keeps the registry of verifiers a payer may fund a deposit under.
+///         identity hash, and points every vault at the current policy and default verifier.
 interface IP2IdVaultFactory {
     event VaultDeployed(bytes32 indexed identityHash, address indexed vault);
-    event VerifierApprovalSet(address indexed verifier, bool approved);
 
-    // ---- verifier registry (owner-managed) ----
-    /// @notice Whether deposits may be funded under, and claimed through, `verifier`.
-    function approvedVerifiers(address verifier) external view returns (bool);
-    /// @notice Verifier used when a payer does not choose one, and the one bare transfers are claimed
-    ///         through. Changes only through a timelocked proposal (see the factory).
+    // ---- what vaults consult on every call; both change only through a timelock ----
+    /// @notice The IP2IDPolicy deciding which verifiers are allowed and what (capped) fee applies.
+    function policy() external view returns (address);
+    /// @notice Verifier used when a payer does not choose one, and the one bare transfers are claimed through.
     function defaultVerifier() external view returns (address);
 
     // ---- vaults ----

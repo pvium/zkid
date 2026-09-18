@@ -9,7 +9,7 @@ const DAY = 86400;
 const ID = ethers.id('identity-a');
 
 describe('PviumP2IdVaultFactory', function () {
-  let factory: any, idv: any, token: any;
+  let factory: any, idv: any, token: any, policy: any;
   let deployer: any, payer: any, ownerWallet: any;
 
   const proofFor = (wallet: string, iat: number, identityHash = ID) =>
@@ -33,9 +33,11 @@ describe('PviumP2IdVaultFactory', function () {
     [deployer, payer, ownerWallet] = await ethers.getSigners();
     idv = await ethers.deployContract('MockIdentityVerifier');
     token = await ethers.deployContract('MockERC20');
+    policy = await ethers.deployContract('PviumP2IDPolicy', [deployer.address, [await idv.getAddress()]]);
     factory = await ethers.deployContract('PviumP2IdVaultFactory', [
       deployer.address,
       NS,
+      await policy.getAddress(),
       await idv.getAddress(),
       7 * DAY,
       DAY,
@@ -58,9 +60,8 @@ describe('PviumP2IdVaultFactory', function () {
     expect(await vault.saltCommitment()).to.equal(ID);
     expect(await vault.nsHash()).to.equal(NS);
     expect(await vault.defaultVerifier()).to.equal(await idv.getAddress());
-    expect(await factory.approvedVerifiers(await idv.getAddress())).to.equal(
-      true,
-    );
+    expect(await vault.policy()).to.equal(await policy.getAddress());
+    expect(await policy.isVerifierAllowed(await idv.getAddress())).to.equal(true);
     expect(await vault.factory()).to.equal(await factory.getAddress());
     expect(await vault.minRefundWindow()).to.equal(DAY);
     expect(await vault.maxRefundWindow()).to.equal(30 * DAY);
@@ -166,53 +167,82 @@ describe('PviumP2IdVaultFactory', function () {
     ).to.be.revertedWithCustomError(vault, 'NotFactory');
   });
 
-  it('the verifier registry is owner-managed; the default is immutable; fundWith picks a verifier', async () => {
+  it('the launch policy is an owner-managed allowlist with no fee; fundWith picks a verifier', async () => {
     const idv2 = await ethers.deployContract('MockIdentityVerifier');
     const V2 = await idv2.getAddress();
-    await expect(
-      factory.connect(payer).approveVerifier(V2, true),
-    ).to.be.revertedWithCustomError(factory, 'NotOwner');
-    await expect(
-      factory.approveVerifier(payer.address, true),
-    ).to.be.revertedWithCustomError(factory, 'InvalidVerifier');
-    await expect(factory.approveVerifier(V2, true))
-      .to.emit(factory, 'VerifierApprovalSet')
-      .withArgs(V2, true);
+    await expect(policy.connect(payer).approveVerifier(V2, true)).to.be.revertedWithCustomError(policy, 'NotOwner');
+    await expect(policy.approveVerifier(payer.address, true)).to.be.revertedWithCustomError(policy, 'InvalidVerifier');
+    await expect(policy.approveVerifier(V2, true)).to.emit(policy, 'VerifierApprovalSet').withArgs(V2, true);
+    expect(await policy.feeBps(V2, await token.getAddress())).to.equal(0n);
+    await expect(policy.distributeFee(V2, await token.getAddress(), 1n)).to.be.revertedWithCustomError(policy, 'NoFees');
     expect(factory.setDefaultVerifier).to.equal(undefined); // no instant setter: only the timelocked proposal
+    expect(factory.approveVerifier).to.equal(undefined); // the allowlist lives in the policy
     expect(await factory.defaultVerifier()).to.equal(await idv.getAddress());
 
     await token.mint(payer.address, 10n);
     await token.connect(payer).approve(await factory.getAddress(), 10n);
-    await factory
-      .connect(payer)
-      .fundWith(ID, V2, await token.getAddress(), 4n, ethers.ZeroHash, DAY); // explicit opt-in
-    await factory
-      .connect(payer)
-      .fund(ID, await token.getAddress(), 6n, ethers.ZeroHash, DAY); // default, unchanged
-    const vault = await ethers.getContractAt(
-      'P2IDVault',
-      await factory.vaultFor(ID),
-    );
+    await factory.connect(payer).fundWith(ID, V2, await token.getAddress(), 4n, ethers.ZeroHash, DAY); // explicit opt-in
+    await factory.connect(payer).fund(ID, await token.getAddress(), 6n, ethers.ZeroHash, DAY); // default, unchanged
+    const vault = await ethers.getContractAt('P2IDVault', await factory.vaultFor(ID));
     expect((await vault.deposits(0)).verifier).to.equal(V2);
     expect((await vault.deposits(1)).verifier).to.equal(await idv.getAddress());
+    expect((await vault.deposits(1)).feeBps).to.equal(0n);
 
-    // two-step ownership
+    // two-step ownership, on both the factory and the policy
     await factory.transferOwnership(payer.address);
-    await expect(
-      factory.connect(deployer).acceptOwnership(),
-    ).to.be.revertedWithCustomError(factory, 'NotPendingOwner');
+    await expect(factory.connect(deployer).acceptOwnership()).to.be.revertedWithCustomError(factory, 'NotPendingOwner');
     await factory.connect(payer).acceptOwnership();
     expect(await factory.owner()).to.equal(payer.address);
-    await expect(
-      factory.approveVerifier(V2, false),
-    ).to.be.revertedWithCustomError(factory, 'NotOwner');
+    await expect(factory.proposePolicy(await policy.getAddress())).to.be.revertedWithCustomError(factory, 'NotOwner');
+    await policy.transferOwnership(payer.address);
+    await policy.connect(payer).acceptOwnership();
+    await expect(policy.approveVerifier(V2, false)).to.be.revertedWithCustomError(policy, 'NotOwner');
+  });
+
+  it('the constructor requires a policy that allows the default verifier', async () => {
+    const F = await ethers.getContractFactory('PviumP2IdVaultFactory');
+    const empty = await ethers.deployContract('PviumP2IDPolicy', [deployer.address, []]);
+    await expect(F.deploy(deployer.address, NS, await empty.getAddress(), await idv.getAddress(), 7 * DAY, DAY, 30 * DAY))
+      .to.be.revertedWithCustomError(F, 'VerifierNotApproved');
+    await expect(F.deploy(deployer.address, NS, payer.address, await idv.getAddress(), 7 * DAY, DAY, 30 * DAY))
+      .to.be.revertedWithCustomError(F, 'InvalidPolicy');
+  });
+
+  it('the policy changes only through a visible timelock, and the new one must allow the default verifier', async () => {
+    const V = await idv.getAddress();
+    const next = await ethers.deployContract('MockFeePolicy');
+    await expect(factory.connect(payer).proposePolicy(await next.getAddress())).to.be.revertedWithCustomError(factory, 'NotOwner');
+    await expect(factory.proposePolicy(payer.address)).to.be.revertedWithCustomError(factory, 'InvalidPolicy');
+    await expect(factory.activatePolicy()).to.be.revertedWithCustomError(factory, 'NothingProposed');
+
+    const tx = await factory.proposePolicy(await next.getAddress());
+    const eta = (await ethers.provider.getBlock((await tx.wait())!.blockNumber))!.timestamp + 7 * DAY;
+    await expect(tx).to.emit(factory, 'PolicyProposed').withArgs(await next.getAddress(), eta);
+    await expect(factory.activatePolicy()).to.be.revertedWithCustomError(factory, 'TimelockNotElapsed');
+    expect(await factory.policy()).to.equal(await policy.getAddress());
+    await time.increase(7 * DAY + 1);
+    // the new policy does not yet allow the default verifier: activation would strand bare transfers
+    await expect(factory.activatePolicy()).to.be.revertedWithCustomError(factory, 'VerifierNotApproved').withArgs(V);
+    await next.allow(V, true);
+    await expect(factory.activatePolicy()).to.emit(factory, 'PolicyActivated').withArgs(await next.getAddress());
+    expect(await factory.policy()).to.equal(await next.getAddress());
+    expect(await factory.proposedPolicyEta()).to.equal(0n);
+
+    // every vault follows immediately, including ones deployed before the switch
+    await factory.deploy(ID);
+    const vault = await ethers.getContractAt('P2IDVault', await factory.vaultFor(ID));
+    expect(await vault.policy()).to.equal(await next.getAddress());
+
+    await factory.proposePolicy(await policy.getAddress());
+    await expect(factory.cancelPolicyProposal()).to.emit(factory, 'PolicyProposalCancelled');
+    await expect(factory.cancelPolicyProposal()).to.be.revertedWithCustomError(factory, 'NothingProposed');
   });
 
   it('the default verifier changes only through a visible timelock', async () => {
     const idv2 = await ethers.deployContract('MockIdentityVerifier');
     const V2 = await idv2.getAddress();
     await expect(factory.proposeDefaultVerifier(V2)).to.be.revertedWithCustomError(factory, 'VerifierNotApproved');
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await expect(factory.activateDefaultVerifier()).to.be.revertedWithCustomError(factory, 'NothingProposed');
     await expect(factory.connect(payer).proposeDefaultVerifier(V2)).to.be.revertedWithCustomError(factory, 'NotOwner');
 
@@ -225,10 +255,10 @@ describe('PviumP2IdVaultFactory', function () {
     expect(await factory.defaultVerifier()).to.equal(await idv.getAddress()); // unchanged during the delay
 
     // a revocation during the delay kills the proposal in effect
-    await factory.approveVerifier(V2, false);
+    await policy.approveVerifier(V2, false);
     await time.increase(7 * DAY + 1);
     await expect(factory.activateDefaultVerifier()).to.be.revertedWithCustomError(factory, 'VerifierNotApproved');
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await expect(factory.activateDefaultVerifier()).to.emit(factory, 'DefaultVerifierActivated').withArgs(V2);
     expect(await factory.defaultVerifier()).to.equal(V2);
     expect(await factory.proposedDefaultEta()).to.equal(0n);

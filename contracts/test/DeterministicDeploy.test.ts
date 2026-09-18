@@ -60,6 +60,7 @@ describe('Deterministic deployment: chain-agnostic P2ID addresses', function () 
     const verifier = await ethers.getContractAt('PviumVerifier', second.pviumVerifier);
     expect(await verifier.pviumIdentity()).to.equal(second.pviumIdentity);
     expect(await factory2.defaultVerifier()).to.equal(second.pviumVerifier);
+    expect(await factory2.policy()).to.equal(second.policy);
     expect(await factory2.owner()).to.equal(ethers.getAddress((await params()).owner));
   });
 
@@ -112,7 +113,7 @@ describe('Deterministic deployment: chain-agnostic P2ID addresses', function () 
     const resumed = await deployStack(p, a, (m) => log.push(m));
     expect(resumed).to.deep.equal(target);
     expect(log.find((l) => l.startsWith('relationsLib'))).to.match(/already deployed, skipped/);
-    expect(log.filter((l) => l.endsWith('  deployed')).length).to.equal(5);
+    expect(log.filter((l) => l.endsWith('  deployed')).length).to.equal(6);
     expect(Object.values(await stackStatus(target)).every(Boolean)).to.equal(true);
 
     // and a run over a complete stack sends nothing at all

@@ -12,7 +12,10 @@ const DETERMINISTIC_DEPLOYER_RUNTIME =
   '0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3';
 
 export interface StackParams {
-  /** Registry owner of the factory: a multisig that exists at the same address on every chain. */
+  /**
+   * Owner of the factory (timelocked policy / default-verifier changes) and of the launch policy
+   * (verifier allowlist): a multisig that exists at the same address on every chain.
+   */
   owner: string;
   /**
    * Address-scheme domain, e.g. "p2id.vault.v1" (the key in sdks/node/src/p2id.json). Its hash is
@@ -41,6 +44,7 @@ export interface StackAddresses {
   zkVerifier: string;
   pviumIdentity: string;
   pviumVerifier: string;
+  policy: string;
   factory: string;
 }
 
@@ -205,10 +209,17 @@ export async function deployStack(
     signer,
     { name: 'pviumVerifier', log },
   );
+  const policy = await deployDeterministic(
+    await initCodeOf('PviumP2IDPolicy', [p.owner, [pviumVerifier]]),
+    salt,
+    signer,
+    { name: 'policy', log },
+  );
   const factory = await deployDeterministic(
     await initCodeOf('PviumP2IdVaultFactory', [
       p.owner,
       nsHash,
+      policy,
       pviumVerifier,
       p.defaultChangeDelay,
       p.minRefundWindow,
@@ -224,6 +235,7 @@ export async function deployStack(
     zkVerifier,
     pviumIdentity,
     pviumVerifier,
+    policy,
     factory,
   };
 }
@@ -261,7 +273,10 @@ export async function checkStack(p: StackParams, a: StackAddresses, expectedVaul
   const factory = await ethers.getContractAt('PviumP2IdVaultFactory', a.factory);
   if (!same(await factory.owner(), p.owner)) fail('factory.owner', await factory.owner(), p.owner);
   if (!same(await factory.defaultVerifier(), a.pviumVerifier)) fail('factory.defaultVerifier', await factory.defaultVerifier(), a.pviumVerifier);
-  if (!(await factory.approvedVerifiers(a.pviumVerifier))) fail('default verifier approval', false, true);
+  if (!same(await factory.policy(), a.policy)) fail('factory.policy', await factory.policy(), a.policy);
+  const policy = await ethers.getContractAt('PviumP2IDPolicy', a.policy);
+  if (!same(await policy.owner(), p.owner)) fail('policy.owner', await policy.owner(), p.owner);
+  if (!(await policy.isVerifierAllowed(a.pviumVerifier))) fail('default verifier allowed by the policy', false, true);
   if ((await factory.nsHash()) !== ethers.id(p.scheme)) fail('factory.nsHash', await factory.nsHash(), ethers.id(p.scheme));
   if (Number(await factory.defaultChangeDelay()) !== p.defaultChangeDelay) fail('defaultChangeDelay', await factory.defaultChangeDelay(), p.defaultChangeDelay);
   if (expectedVaultInitCodeHash && (await factory.initCodeHash()) !== expectedVaultInitCodeHash) {

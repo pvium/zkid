@@ -65,8 +65,8 @@ identityHash = SHA-256( "p2id.identity.v1" ‖ 0x00 ‖ "test-9988@privy.io" )
              = 0xbcda0f09fa9732b2bfdea38199486b654a84e8e06085d7e364af8137f8d7deaf
 
 factory           = 0x1111111111111111111111111111111111111111      (illustrative)
-vaultInitCodeHash = 0xedeb17b2cad352aa707895e12dddf28ba5ced700b2feaf31d26c3ee221d84768
-p2id              = 0xdFb0272b2178A35D2ad0693F51b5Dd23659C3235
+vaultInitCodeHash = 0xee9e754a61e88c528c790b17d279033c4750ae71c1e2dd07133e4a2009e6ce5c
+p2id              = 0x59ed1B4a2C6c62621d8dfCf31a9b4c0Ab8cC4D02
 ```
 
 The preimage, byte for byte (35 bytes here):
@@ -157,10 +157,15 @@ production address and one sandbox address; SDKs default to production.
 1. The owner signs in with Privy; the prover turns their identity token into a proof that the
    token, signed by Privy's key, contains a linked account of that type and value and a linked
    wallet, without revealing the token or the value.
-2. The proof is presented to the vault under a verifier from the factory's approved registry.
+2. The proof is presented to the vault under the verifier the deposit was made with, one the
+   factory's policy allows.
    The verifier checks the proof is for this vault's identity hash and returns the wallet that the
    circuit read out of the signed token; the vault pays that wallet.
 3. A newer proof retires every older one for that vault, so moving to a new wallet is one call.
+
+Rules and fees come from the factory's policy, which can change only through a public timelock.
+The vault bounds it: a fee is at most 1% of a payout, is fixed when a deposit is made, is never
+charged on a refund, and a policy can never redirect a payout to anyone but the proven wallet.
 
 See [`contracts/README.md`](contracts/README.md) for the contracts and
 [`sdks/node/README.md`](sdks/node/README.md) for verification and address derivation in code.

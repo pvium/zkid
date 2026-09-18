@@ -10,7 +10,7 @@ const Z = ethers.ZeroHash;
 describe('P2IDVault', function () {
   this.timeout(120_000);
 
-  let vault: any, token: any, other: any, idv: any, idv2: any, factory: any;
+  let vault: any, token: any, other: any, idv: any, idv2: any, factory: any, policy: any;
   let V: string, V2: string;
   let deployer: any, alice: any, spammer: any, ownerWallet: any;
 
@@ -38,7 +38,8 @@ describe('P2IDVault', function () {
     V2 = await idv2.getAddress();
     token = await ethers.deployContract('MockERC20');
     other = await ethers.deployContract('MockERC20');
-    factory = await ethers.deployContract('PviumP2IdVaultFactory', [deployer.address, NS, V, 7 * DAY, DAY, 30 * DAY]);
+    policy = await ethers.deployContract('PviumP2IDPolicy', [deployer.address, [V]]);
+    factory = await ethers.deployContract('PviumP2IdVaultFactory', [deployer.address, NS, await policy.getAddress(), V, 7 * DAY, DAY, 30 * DAY]);
     await factory.deploy(COMMIT);
     vault = await ethers.getContractAt('P2IDVault', await factory.vaultFor(COMMIT));
   });
@@ -243,7 +244,7 @@ describe('P2IDVault', function () {
     await token.connect(alice).approve(await vault.getAddress(), 10n);
     await expect(vault.connect(alice).fundWith(V2, await token.getAddress(), 10n, Z, DAY))
       .to.be.revertedWithCustomError(vault, 'VerifierNotApproved').withArgs(V2);
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await vault.connect(alice).fundWith(V2, await token.getAddress(), 10n, Z, DAY);
     expect((await vault.deposits(0)).verifier).to.equal(V2);
     expect(await vault.bucketTotal(V2, Z, await token.getAddress())).to.equal(10n);
@@ -251,7 +252,7 @@ describe('P2IDVault', function () {
   });
 
   it('each verifier has its own owner, ratchet and buckets; only the default verifier takes untracked funds', async () => {
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await fundAs(alice, token, 100n); // default verifier (V)
     await token.mint(alice.address, 40n);
     await token.connect(alice).approve(await vault.getAddress(), 40n);
@@ -273,24 +274,24 @@ describe('P2IDVault', function () {
   });
 
   it('revoking a verifier freezes claims under it but not refunds; re-approving resumes', async () => {
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await token.mint(alice.address, 10n);
     await token.connect(alice).approve(await vault.getAddress(), 10n);
     await vault.connect(alice).fundWith(V2, await token.getAddress(), 10n, Z, DAY);
     await vault.refreshProof(V2, proofFor(ownerWallet.address, 1000));
 
-    await factory.approveVerifier(V2, false);
+    await policy.approveVerifier(V2, false);
     await expect(vault.sweep(V2, await token.getAddress(), 0)).to.be.revertedWithCustomError(vault, 'VerifierNotApproved');
     await expect(vault.refreshProof(V2, proofFor(ownerWallet.address, 2000))).to.be.revertedWithCustomError(vault, 'VerifierNotApproved');
     await expect(vault.sweepDeposits(V2, await token.getAddress(), [0])).to.be.revertedWithCustomError(vault, 'VerifierNotApproved');
-    await factory.approveVerifier(V2, true);
+    await policy.approveVerifier(V2, true);
     await vault.sweep(V2, await token.getAddress(), 0);
     expect(await token.balanceOf(ownerWallet.address)).to.equal(10n);
 
     await token.mint(alice.address, 5n);
     await token.connect(alice).approve(await vault.getAddress(), 5n);
     await vault.connect(alice).fundWith(V2, await token.getAddress(), 5n, Z, DAY);
-    await factory.approveVerifier(V2, false);
+    await policy.approveVerifier(V2, false);
     await time.increase(DAY + 1);
     await vault.connect(alice).refund(1); // still refundable while frozen
     expect(await token.balanceOf(alice.address)).to.equal(5n);

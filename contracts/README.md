@@ -43,22 +43,29 @@ yarn fixtures   # after re-proving in ../circuit: refresh test fixtures + regene
 - `src/P2IDVault.sol` — per-identity vault holding ERC-20 deposits until the identity's owner
   proves it. No constructor arguments: the deployer is recorded as `factory` and must call
   `initialize` once, so the creation code is a constant. Every deposit names the `IP2IDVerifier`
-  whose proofs can release it (`fund` takes the factory default, `fundWith` any approved one);
-  buckets, owner wallet and the proof-freshness ratchet are all per verifier, and the vault
-  checks the factory's approval on every fund and claim. Anyone can build a verifier for Pvium
-  users to claim through, once the factory owner approves it.
-- `src/PviumP2IdVaultFactory.sol` — deploys vaults with CREATE2 salted by identity hash and keeps
-  the verifier registry (`approveVerifier`, owner-managed). The default verifier moves only through
-  a timelock (`proposeDefaultVerifier`, wait `defaultChangeDelay`, `activateDefaultVerifier`), so a
-  compromised owner can add verifiers payers opt into, or announce a default change that stays
-  visible on chain for the whole delay, but never redirect `fund()` instantly. The owner is meant
-  to be a Pvium multisig now and can be handed to a DAO later through the two-step transfer. An
+  whose proofs can release it (`fund` takes the factory default, `fundWith` any allowed one);
+  buckets, owner wallet and the proof-freshness ratchet are all per verifier. The vault holds
+  mechanics only and consults the factory's **policy** on every call, within limits written into
+  its own bytecode: fees are capped at `MAX_FEE_BPS` (1%), fixed per deposit when it is made, and
+  accrue in the vault per verifier and token without the payout ever calling the policy about
+  fees; `withdrawFees(verifier, token)`, callable by anyone, approves the current policy for exactly
+  the owed amount and calls its `distributeFee`, which pulls and splits it (e.g. between a
+  verifier's operator and the protocol); refunds never pay a fee or consult the policy; a policy can disallow a verifier (freezing claims under it) but can
+  never redirect a payout. Constrained deposits are refused under a verifier whose
+  `supportsConstraints()` is false. Each claimed deposit emits `Claimed`.
+- `src/interfaces/IP2IDPolicy.sol`, `src/PviumP2IDPolicy.sol` — what is expected to evolve:
+  which verifiers are allowed, what fee applies, and how collected fees are distributed. The launch policy is an owner-managed
+  allowlist with no fee. Permissionless, stake-based verifier registration and protocol fees are
+  later policies; switching to one never changes the vault or any address.
+- `src/PviumP2IdVaultFactory.sol` — deploys vaults with CREATE2 salted by identity hash, and
+  points them at the current policy and default verifier. Both change only through a timelock
+  (`proposePolicy` / `proposeDefaultVerifier`, wait `defaultChangeDelay`, `activate…`), so a
+  compromised owner can only announce changes that stay visible on chain for the whole delay. An
   identity's vault address is `keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(P2IDVault creationCode))`
   (`vaultFor`, `initCodeHash`), so payers can derive it offline and pay before the vault exists.
   `fund()` / `fundWith()` deploy on first use and fund on the caller's behalf: approve the factory
-  once to pay any identity. Adding or changing verifiers never moves an address: old deposits stay
-  claimable through the verifier they were funded under (while approved) or refundable.
-- `src/interfaces/` — `IPviumIdentity`, `IP2IDVault`, `IP2IdVaultFactory`, `IP2IDVerifier`: what developers import.
+  once to pay any identity.
+- `src/interfaces/` — `IPviumIdentity`, `IP2IDVault`, `IP2IdVaultFactory`, `IP2IDVerifier`, `IP2IDPolicy`: what developers import.
 
 ## Verifying from a mobile app
 
