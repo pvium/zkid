@@ -91,8 +91,32 @@ generated; re-resolve later or apply your own policy.
 | `IdentityType` | enum of identity ids, if you prefer it over the string names |
 | `shutdown()` | release the WASM verifier when your process is done |
 | `CIRCUIT_VERSION`, `VK_SHA256` | the circuit version this release verifies, and its vk hash |
+| `p2idAddress(input)`, `identityHash(type, value)` | P2ID v1 address derivation, see below |
 
 Proof bytes and public inputs may be passed as `Uint8Array` or base64 strings.
+
+## P2ID addresses
+
+An identity's P2ID v1 address is the address of its vault, which is deterministic and can be
+computed before the vault exists:
+
+```ts
+import { p2idAddress, identityHash } from '@pvium/zkid';
+
+// by chain id (uses the Pvium factory pinned in this release) …
+const to = await p2idAddress({ identityType: 'email', identityValue: 'you@example.com', factory: 8453 });
+// … or against any factory address
+const to2 = await p2idAddress({ identityType: 'github_oauth', identityValue: 'octocat', factory: '0xFactory…' });
+
+const salt = await identityHash('email', 'you@example.com'); // the vault's CREATE2 salt / commitment
+```
+
+The derivation is `keccak256(0xff ‖ factory ‖ identityHash ‖ keccak256(P2IDVault creationCode))`
+with `identityHash = sha256("p2id.identity.v1" ‖ typeId ‖ normalize(value))`; `normalize`
+lowercases everything except phone numbers and non-`0x` wallet addresses. The creation-code
+hash is `P2ID_VAULT_INIT_CODE_HASH` and factories per chain are `P2ID_FACTORIES`. A plain ERC-20
+transfer to that address is claimable by the identity's owner once anyone deploys the vault; use
+the factory's `fund()` when you need refund rights or a funding constraint.
 
 ## Solidity
 

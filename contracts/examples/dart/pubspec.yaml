@@ -1,0 +1,6 @@
+name: pvium_verify_example
+description: Verify a Pvium attestation JSON against PviumIdentity.verifyIdentityHashes with a raw eth_call.
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+dependencies:
+  crypto: ^3.0.0

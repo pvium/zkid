@@ -6,3 +6,5 @@ export type { PviumEnvironment, PviumEnvironmentName } from './environments.js';
 export type { IdentityTypeName } from './identityNames.js';
 export { shutdown } from './verify.js';
 export { VK_SHA256, CIRCUIT_VERSION } from './vk.js';
+export { identityHash, p2idAddress, p2idAddressForHash, p2idFactory, checksumAddress, P2ID_FACTORIES, P2ID_VAULT_INIT_CODE_HASH } from './p2id.js';
+export type { P2IDAddressInput } from './p2id.js';

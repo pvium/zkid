@@ -1,0 +1,5 @@
+{
+  "vaultInitCodeHash": "0x9bb9f157d3bae1e87106f781b0db9e62c4ad40bbcfc52f02590fffa629cd452f",
+  "factories": {},
+  "notes": "vaultInitCodeHash = keccak256(P2IDVault creation bytecode) from the Hardhat artifact (solc 0.8.28, optimizer 200 runs); run `node scripts/embed-p2id.mjs --update` after any vault change. factories maps EIP-155 chain id -> deployed PviumP2IdVaultFactory address; fill in at deployment."
+}

@@ -20,13 +20,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "sh scripts/sync-contracts.sh && node scripts/embed-vk.mjs && tsc -p tsconfig.json",
+    "build": "sh scripts/sync-contracts.sh && node scripts/embed-vk.mjs && node scripts/embed-p2id.mjs && tsc -p tsconfig.json",
     "test": "yarn build && node --test --import tsx test/*.test.ts",
     "sync": "sh scripts/sync-circuit.sh",
     "prepublishOnly": "yarn test"
   },
   "dependencies": {
-    "@aztec/bb.js": "5.0.0-nightly.20260522"
+    "@aztec/bb.js": "5.0.0-nightly.20260522",
+    "@noble/hashes": "^1.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
