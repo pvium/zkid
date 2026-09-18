@@ -10,6 +10,7 @@ import { InputError } from '../src/errors.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, '..', '..', 'circuit', 'test', 'fixtures');
 const jwt = readFileSync(join(fixtures, 'sample_token.jwt'), 'utf8').trim();
+const SERVED_VERSION: number = JSON.parse(readFileSync(join(here, '..', 'circuit', 'version.json'), 'utf8')).circuitVersion;
 const pemFile = join(fixtures, 'privy_es256_public.pem');
 const WALLET = '0xA01b6E60D51eDB3fEB9f86a62b846f4F90070f98';
 
@@ -47,7 +48,7 @@ test('async job delivers a real attestation to the callback', { skip: !canProve 
     assert.equal(d.jobId, 'job-1');
     assert.equal(d.status, 'ok');
     assert.equal(d.attestation.wallet, WALLET);
-    assert.equal(d.attestation.circuitVersion, 1);
+    assert.equal(d.attestation.circuitVersion, SERVED_VERSION);
   } finally {
     s.close();
     outbox.close();
@@ -62,7 +63,7 @@ test('generates an attestation the SDK verifies', { skip: !canProve && 'bb / cir
   t.diagnostic(`attestation generated in ${((Date.now() - started) / 1000).toFixed(1)} s`);
   assert.equal(a.issuedAt, 1789240094);
   assert.equal(a.wallet, WALLET);
-  assert.equal(a.circuitVersion, 1);
+  assert.equal(a.circuitVersion, SERVED_VERSION);
   assert.match(a.vkHash, /^0x[0-9a-f]{64}$/);
   assert.equal(Buffer.from(a.publicInputs, 'base64').length, 11 * 32);
 

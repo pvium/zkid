@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { createPublicKey } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CIRCUIT_VERSION, IdentityType, shutdown, verifyIdentity, type Attestation } from '../src/index.js';
+import { AttestationSigner, CIRCUIT_VERSION, IdentityType, shutdown, verifyIdentity, type Attestation } from '../src/index.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const proof = new Uint8Array(readFileSync(join(fixtures, 'email.proof')));
@@ -28,12 +28,50 @@ test('accepts the enum, base64 transport, and any casing of the identity value',
   assert.equal((r as { wallet: string }).wallet, WALLET.toLowerCase());
 });
 
+test("signer: 'sandbox' verifies the sample attestation from pinned keys, offline", async () => {
+  // The fixture token is signed by the sandbox Privy app; its key is pinned in environments.ts.
+  const r = await verifyIdentity({ attestation, signer: 'sandbox', identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.equal(r.valid, true);
+});
+
+test('AttestationSigner enum and a plain JWKS URL string are accepted as signers', async () => {
+  const typed = await verifyIdentity({ attestation, signer: AttestationSigner.Sandbox, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.equal(typed.valid, true);
+  const jwk = createPublicKey(pem).export({ format: 'jwk' });
+  const server = createServer((_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ keys: [{ kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y }] })); });
+  await new Promise<void>((ok) => server.listen(0, ok));
+  try {
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/jwks.json`;
+    const byUrl = await verifyIdentity({ attestation, signer: url, identityType: 'email', identityValue: 'test-9988@privy.io' });
+    assert.equal(byUrl.valid, true);
+  } finally {
+    server.close();
+  }
+  const junk = await verifyIdentity({ attestation, signer: 'not-a-signer', identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.equal(junk.valid, false);
+  assert.match((junk as { reason: string }).reason, /unrecognised signer/);
+});
+
+test("signer: 'production' rejects a sandbox attestation", async () => {
+  const r = await verifyIdentity({ attestation, signer: 'production', identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.deepEqual(r, { valid: false, reason: 'not signed by a trusted key' });
+});
+
+test('environment presets carry the app id, JWKS URL and pinned keys', async () => {
+  const { PVIUM_ENVIRONMENTS } = await import('../src/index.js');
+  for (const env of Object.values(PVIUM_ENVIRONMENTS)) {
+    assert.ok(env.jwksUrl.includes(env.privyAppId));
+    assert.ok(env.keys.length >= 1);
+    for (const k of env.keys) assert.ok(k.kid && k.x > 0n && k.y > 0n);
+  }
+});
+
 test('accepts its own circuit version and rejects others by name', async () => {
-  assert.equal(CIRCUIT_VERSION, 1);
-  const same = await verifyIdentity({ attestation: { ...attestation, circuitVersion: 1 }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  const same = await verifyIdentity({ attestation: { ...attestation, circuitVersion: CIRCUIT_VERSION }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
   assert.equal(same.valid, true);
-  const other = await verifyIdentity({ attestation: { ...attestation, circuitVersion: 2 }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
-  assert.deepEqual(other, { valid: false, reason: 'attestation is for circuit version 2; this SDK verifies version 1' });
+  const next = CIRCUIT_VERSION + 1;
+  const other = await verifyIdentity({ attestation: { ...attestation, circuitVersion: next }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
+  assert.deepEqual(other, { valid: false, reason: `attestation is for circuit version ${next}; this SDK verifies version ${CIRCUIT_VERSION}` });
   const build = await verifyIdentity({ attestation: { ...attestation, vkHash: '0x' + 'ab'.repeat(32) }, signer: pem, identityType: 'email', identityValue: 'test-9988@privy.io' });
   assert.equal(build.valid, false);
 });

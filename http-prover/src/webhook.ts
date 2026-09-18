@@ -72,6 +72,7 @@ export async function runWebhookJob(
   const failure = await deliver(callback.toString(), jobId, body);
   if (failure) outbox.markAttemptFailed(jobId, failure.error, failure.final);
   else outbox.markDelivered(jobId);
+  console.log(`${new Date().toISOString()} job ${jobId} ${result.status} type=${req.identityType} wallet=${req.wallet ?? '-'} callback=${callback.host} delivery=${failure ? `failed (${failure.error})` : 'delivered'}`);
 }
 
 /** Periodically re-delivers due outbox rows. Runs once immediately on start (restart recovery). */
@@ -99,6 +100,7 @@ export class Dispatcher {
         const failure = await deliver(job.callbackUrl, job.jobId, job.body);
         if (failure) this.outbox.markAttemptFailed(job.jobId, failure.error, failure.final);
         else this.outbox.markDelivered(job.jobId);
+        console.log(`${new Date().toISOString()} job ${job.jobId} retry ${job.attempts + 1} delivery=${failure ? `failed (${failure.error})` : 'delivered'}`);
       }
     } catch (e) {
       console.error('dispatcher tick failed:', (e as Error).message);

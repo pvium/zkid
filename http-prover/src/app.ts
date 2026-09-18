@@ -8,6 +8,25 @@ import { Dispatcher, parseCallbackUrl, runWebhookJob } from './webhook.js';
 import { Outbox } from './outbox.js';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * One line per request on stdout (PM2 / Railway collect it):
+ *   2026-09-14T10:00:00.000Z POST /attestations 202 14ms ip=1.2.3.4 mode=async type=email wallet=0x… job=…
+ * Never logs the token or the identity value: one is a credential, the other personal data.
+ */
+function requestLog(req: Request, res: Response, next: NextFunction) {
+  const started = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    const extra = Object.entries((res.locals.log ?? {}) as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(' ');
+    const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() ?? req.socket.remoteAddress ?? '-';
+    console.log(`${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ${ms.toFixed(0)}ms ip=${ip}${extra ? ' ' + extra : ''}`);
+  });
+  next();
+}
+
 export function createApp(cfg: ProverConfig, secret: string) {
   if (!secret) throw new Error('AUTH_TOKEN is required');
   const service = new AttestationService(cfg);
@@ -23,6 +42,7 @@ export function createApp(cfg: ProverConfig, secret: string) {
     outbox.close();
   };
   app.disable('x-powered-by');
+  app.use(requestLog);
   app.use(express.json({ limit: '64kb' }));
 
   app.get('/healthz', (_req, res) => {
@@ -51,10 +71,12 @@ export function createApp(cfg: ProverConfig, secret: string) {
       const jobId = randomUUID();
       // Validate cheaply before accepting, so a malformed request still gets a 400 not a webhook error.
       service.validateRequest(body);
+      res.locals.log = { mode: 'async', type: body.identityType, wallet: body.wallet, job: jobId };
       void runWebhookJob(service, outbox, body, callback, jobId);
       res.status(202).json({ jobId, status: 'queued', ...service.stats });
       return;
     }
+    res.locals.log = { mode: 'sync', type: body.identityType, wallet: body.wallet };
     res.json(await service.generate(body));
   });
 

@@ -1,5 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
@@ -7,6 +8,7 @@ import { createApp } from '../src/app.js';
 import { configFromEnv } from '../src/config.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const SERVED_VERSION: number = JSON.parse(readFileSync(join(here, '..', 'circuit', 'version.json'), 'utf8')).circuitVersion;
 const pemFile = join(here, '..', '..', 'circuit', 'test', 'fixtures', 'privy_es256_public.pem');
 const cfg = configFromEnv({ ...process.env, PRIVY_JWKS_URL: undefined, PRIVY_PUBLIC_KEY_PEM_FILE: pemFile,
   CIRCUIT_JSON: join(here, '..', 'circuit', 'pvium_identity.json'), VK_PATH: join(here, '..', 'circuit', 'vk'),
@@ -35,14 +37,14 @@ test('healthz is open and reports the circuit version', async () => {
   const r = await fetch(`${base}/healthz`);
   assert.equal(r.status, 200);
   const body = (await r.json()) as { circuitVersion: number; vkHash: string };
-  assert.equal(body.circuitVersion, 1);
+  assert.equal(body.circuitVersion, SERVED_VERSION);
   assert.match(body.vkHash, /^0x[0-9a-f]{64}$/);
 });
 
 test('rejects a circuit version this prover does not serve', async () => {
-  const r = await post({ identityType: 'email', identityValue: 'a@b.c', jwt: 'x.y.z', wallet: '0x1', version: 2 }, `Bearer ${SECRET}`);
+  const r = await post({ identityType: 'email', identityValue: 'a@b.c', jwt: 'x.y.z', wallet: '0x1', version: SERVED_VERSION + 1 }, `Bearer ${SECRET}`);
   assert.equal(r.status, 400);
-  assert.match(((await r.json()) as { error: string }).error, /unsupported circuit version 2/);
+  assert.match(((await r.json()) as { error: string }).error, new RegExp(`unsupported circuit version ${SERVED_VERSION + 1}`));
 });
 
 test('rejects missing or wrong secret', async () => {

@@ -25,7 +25,7 @@ after(() => shutdown());
 
 test('decodes the claim from raw public inputs and from hex fields alike', () => {
   assert.equal(claim.identityType, IdentityType.Email);
-  assert.equal(claim.recipient, '0x0000000000000000000000000000000000000001');
+  assert.equal(claim.wallet, SAMPLE_WALLET.toLowerCase());
   assert.equal(claim.iat, 1789240094);
   assert.deepEqual(decodeClaim(toPublicInputFields(publicInputs)), claim);
 });
@@ -63,7 +63,7 @@ test('verifyProof rejects a flipped proof byte', async () => {
 
 test('verifyProof rejects a changed public input', async () => {
   const fields = toPublicInputFields(publicInputs);
-  fields[1] = '0x' + '2'.padStart(64, '0'); // recipient
+  fields[1] = '0x' + '2'.padStart(64, '0'); // wallet
   assert.equal(await verifyProof({ proof, publicInputs: fields }), false);
 });
 

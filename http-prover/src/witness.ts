@@ -12,8 +12,6 @@ export interface WitnessRequest {
   identityValue: string;
   /** Optional linked wallet to bind (second slot). */
   wallet?: string;
-  /** Optional public field bound into the proof (escrow claims); zero-address for attestations. */
-  recipient?: string;
 }
 
 // ---- JSON structure helpers, mirroring circuit/scripts/gen_prover.py ---------------------------
@@ -163,9 +161,17 @@ export function buildWitness(req: WitnessRequest, lowSSignature: Buffer): BuiltW
     wallet_value_idx: String(wallet[3]),
     wallet_value_len: String(wallet[4]),
     identity_type: String(spec.id),
-    recipient: req.recipient ?? '0x0000000000000000000000000000000000000001',
+    // Public `wallet` input: the EVM address as a field, which the circuit checks against the
+    // 0x-hex value it reads from the token. Zero for base58 wallets or no wallet slot.
+    wallet: walletField(req.wallet),
   };
   return { inputs, iat };
+}
+
+function walletField(wallet: string | undefined): string {
+  if (wallet === undefined || !wallet.toLowerCase().startsWith('0x')) return '0x0';
+  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new InputError('EVM wallet must be 0x + 40 hex chars');
+  return '0x' + BigInt(wallet).toString(16);
 }
 
 /** Render inputs exactly as circuit/scripts/gen_prover.py writes Prover.toml (used for parity tests). */

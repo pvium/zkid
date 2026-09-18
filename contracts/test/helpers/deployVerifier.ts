@@ -1,7 +1,7 @@
 import { ethers } from 'hardhat';
 
 /**
- * Deploys the Honk verifier together with the external libraries bb splits out of it
+ * Deploys PviumZKVerifier (the bb-generated Honk verifier) together with the external libraries bb splits out of it
  * (RelationsLib, ZKTranscriptLib) and links them. Reuse this from deployment scripts.
  */
 export async function deployVerifier() {
@@ -9,7 +9,7 @@ export async function deployVerifier() {
   const transcript = await ethers.deployContract('ZKTranscriptLib');
   await Promise.all([relations.waitForDeployment(), transcript.waitForDeployment()]);
 
-  const verifier = await ethers.deployContract('HonkVerifier', {
+  const verifier = await ethers.deployContract('PviumZKVerifier', {
     libraries: {
       RelationsLib: await relations.getAddress(),
       ZKTranscriptLib: await transcript.getAddress(),
@@ -20,7 +20,7 @@ export async function deployVerifier() {
 }
 
 /** Deploys PviumIdentity bound to a verifier and a registered signer key. */
-export async function deployIdentityProof(verifierAddress: string, signerX: bigint, signerY: bigint, circuitVersion = 1) {
+export async function deployIdentityProof(verifierAddress: string, signerX: bigint, signerY: bigint, circuitVersion = 2) {
   const proof = await ethers.deployContract('PviumIdentity', [verifierAddress, circuitVersion, signerX, signerY]);
   await proof.waitForDeployment();
   return proof;

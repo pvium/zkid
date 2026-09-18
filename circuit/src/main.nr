@@ -12,7 +12,12 @@
 //! can state "identity X and wallet W belong to the same Privy user". Leave
 //! `wallet_value_len = 0` to skip it; `wallet_hash` is then zero.
 //!
-//! Public inputs:  identity_type, recipient
+//! The public input `wallet` is the EVM address of that wallet account. It is not trusted: the
+//! circuit decodes the `0x…` hex address it read out of the signed token and asserts it equals
+//! `wallet`, so the address a verifier pays is exactly the one Privy linked. For a non-EVM
+//! wallet (base58) or no wallet slot, `wallet` must be zero and only `wallet_hash` identifies it.
+//!
+//! Public inputs:  identity_type, wallet
 //! Public outputs: signer_x (hi, lo), signer_y (hi, lo), iat, identity_hash (hi, lo),
 //!                 wallet_hash (hi, lo)
 //!
@@ -118,12 +123,10 @@ fn main(
     // --- public inputs -----------------------------------------------------------
     // See `identity.nr` for ids.
     identity_type: pub u8,
-    // Arbitrary field bound into the proof (on-chain: the claim recipient) so a
-    // proof cannot be replayed by someone else.
-    recipient: pub Field,
+    // EVM address of the wallet slot's account, as a 160-bit field; asserted against the
+    // address decoded from the token. Zero when the slot is unused or the wallet is not `0x…`.
+    wallet: pub Field,
 ) -> pub PublicOutputs {
-    // `recipient` is intentionally unconstrained: being a public input binds it to the proof.
-    let _ = recipient;
 
     // ---- 1. Hash the signing input exactly as the JWT signer did --------------------
     assert(signing_input_len <= MAX_SIGNING_LEN, "signing input too long");
@@ -193,9 +196,10 @@ fn main(
         AccountRef { acct_start, acct_end, type_idx, value_idx, value_len },
         identity_type,
         true,
-    );
+    )
+        .hash;
     let has_wallet = wallet_value_len != 0;
-    let wallet_hash = prove_account(
+    let wallet_acct = prove_account(
         payload,
         payload_len,
         in_string,
@@ -210,6 +214,20 @@ fn main(
         identity::WALLET,
         has_wallet,
     );
+    let wallet_hash = wallet_acct.hash;
+
+    // ---- 5. Bind the public `wallet` address to the wallet account read from the token -----
+    // For an EVM wallet the value is "0x" + 40 hex chars (already lowercased); decode it and
+    // require equality. Otherwise `wallet` must be zero. The verifier can therefore pay
+    // `wallet` directly, and cross-check it against `wallet_hash` with the same formula.
+    let is_evm = has_wallet & wallet_acct.evm_hex;
+    assert(!is_evm | (wallet_acct.value_len == EVM_ADDRESS_LEN), "EVM wallet must be 0x + 40 hex chars");
+    let mut decoded: Field = 0;
+    for k in 0..40 {
+        decoded = decoded * 16 + hex_digit(wallet_acct.value[2 + k], is_evm);
+    }
+    let expected_wallet = if is_evm { decoded } else { 0 };
+    assert(wallet == expected_wallet, "wallet does not match the wallet account in the token");
 
     let (signer_x_hi, signer_x_lo) = pack_hash(signer_x);
     let (signer_y_hi, signer_y_lo) = pack_hash(signer_y);
@@ -228,10 +246,25 @@ fn main(
     }
 }
 
+/// Length of an EVM address as Privy stores it: "0x" + 40 hex chars.
+global EVM_ADDRESS_LEN: u32 = 42;
+
+/// What `prove_account` established about one linked account.
+struct ProvenAccount {
+    /// sha256(HASH_PREFIX || identity_type || normalize(value)), or zero when disabled.
+    hash: [u8; 32],
+    /// normalize(value), zero-padded to MAX_VALUE_LEN.
+    value: [u8; MAX_VALUE_LEN],
+    value_len: u32,
+    /// The value starts with "0x" (an EVM hex address).
+    evm_hex: bool,
+}
+
 /// Check that `a` points at a flat account object of type `identity_type` inside the
-/// `linked_accounts` string, and return `sha256(HASH_PREFIX || identity_type || normalize(value))`.
-/// With `enabled == false` every check is a no-op and the result is all zeros; the effective
-/// offsets are forced to constants so no dynamic read can go out of range.
+/// `linked_accounts` string, and return `sha256(HASH_PREFIX || identity_type || normalize(value))`
+/// together with the normalized value. With `enabled == false` every check is a no-op and the
+/// result is all zeros; the effective offsets are forced to constants so no dynamic read can go
+/// out of range.
 fn prove_account<let N: u32>(
     payload: [u8; N],
     payload_len: u32,
@@ -240,7 +273,7 @@ fn prove_account<let N: u32>(
     a: AccountRef,
     identity_type: u8,
     enabled: bool,
-) -> [u8; 32] {
+) -> ProvenAccount {
     let off = !enabled;
     let acct_start = if enabled { a.acct_start } else { 0 };
     let acct_end = if enabled { a.acct_end } else { 0 };
@@ -316,18 +349,33 @@ fn prove_account<let N: u32>(
     let two = enabled & (value_len >= 2);
     let evm_hex = (read_at(payload, value_start, two) == 48) & (read_at(payload, value_start + 1, two) == 120);
     let lower = spec.case_insensitive | (evm_hex & (identity_type == identity::WALLET));
+    let mut value: [u8; MAX_VALUE_LEN] = [0; MAX_VALUE_LEN];
     for k in 0..MAX_VALUE_LEN {
         let on = enabled & (k < value_len);
         let b = read_at(payload, value_start + k, on);
         // A backslash would mean the "value" spans an escaped quote into the next member.
         assert(!(on & (b == BACKSLASH)), "identity value contains a backslash");
-        preimage[prefix_len + k] = if lower { to_lower(b) } else { b };
+        let nb = if lower { to_lower(b) } else { b };
+        preimage[prefix_len + k] = nb;
+        value[k] = nb;
     }
     let h = sha256_var(preimage, prefix_len + value_len);
-    if enabled {
-        h
+    ProvenAccount { hash: if enabled { h } else { [0; 32] }, value, value_len, evm_hex: enabled & evm_hex }
+}
+
+/// Value of a lowercase hex digit. When `on`, a byte that is not `0-9a-f` fails the proof;
+/// when off, returns 0 without checking.
+fn hex_digit(b: u8, on: bool) -> Field {
+    let num = (b >= 48) & (b <= 57);
+    let alpha = (b >= 97) & (b <= 102);
+    assert(!on | num | alpha, "invalid hex digit in wallet address");
+    let f = b as Field;
+    if num {
+        f - 48
+    } else if alpha {
+        f - 87
     } else {
-        [0; 32]
+        0
     }
 }
 

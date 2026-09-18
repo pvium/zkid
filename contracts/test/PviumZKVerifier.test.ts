@@ -12,7 +12,7 @@ const IDENTITY_TYPE_EMAIL = 0;
 // Public input order emitted by the circuit
 const PI = {
   identityType: 0,
-  recipient: 1,
+  wallet: 1,
   signerXHi: 2,
   signerXLo: 3,
   signerYHi: 4,
@@ -72,7 +72,7 @@ function sampleSignerKey(): { x: bigint; y: bigint } {
   };
 }
 
-describe('PviumIdentityVerifier (HonkVerifier)', function () {
+describe('PviumZKVerifier (generated Honk verifier)', function () {
   this.timeout(120_000);
 
   let verifier: any;
@@ -101,9 +101,9 @@ describe('PviumIdentityVerifier (HonkVerifier)', function () {
     console.log(`      verify gas: ${gas.toString()}`);
   });
 
-  it('public inputs decode to the expected identity type, recipient and iat', () => {
+  it('public inputs decode to the expected identity type, wallet and iat', () => {
     expect(BigInt(publicInputs[PI.identityType])).to.equal(BigInt(IDENTITY_TYPE_EMAIL));
-    expect(BigInt(publicInputs[PI.recipient])).to.equal(1n);
+    expect(BigInt(publicInputs[PI.wallet])).to.equal(BigInt(SAMPLE_WALLET));
     expect(BigInt(publicInputs[PI.iat])).to.equal(1789240094n);
   });
 
@@ -141,9 +141,9 @@ describe('PviumIdentityVerifier (HonkVerifier)', function () {
     expect(walletHash).to.equal(expected);
   });
 
-  it('rejects a proof whose recipient was changed', async () => {
+  it('rejects a proof whose wallet was changed', async () => {
     const tampered = [...publicInputs];
-    tampered[PI.recipient] = ethers.toBeHex(2n, 32);
+    tampered[PI.wallet] = ethers.toBeHex(2n, 32);
     await expect(verifier.verify(proof, tampered)).to.be.reverted;
   });
 
@@ -193,13 +193,16 @@ describe('PviumIdentity', function () {
     publicInputs = loadPublicInputs();
   });
 
-  it('stores the registered signer key raw', async () => {
+  it('stores the registered signer key raw; nothing is updatable', async () => {
     const { x, y } = sampleSignerKey();
     const gate = await deployIdentityProof(verifierAddress, x, y);
     expect(await gate.signerX()).to.equal(x);
     expect(await gate.signerY()).to.equal(y);
     expect(await gate.verifier()).to.equal(verifierAddress);
-    expect(await gate.circuitVersion()).to.equal(1n);
+    expect(await gate.circuitVersion()).to.equal(2n);
+    for (const fn of ['configure', 'addSignerKey', 'addCircuit', 'owner', 'transferOwnership']) {
+      expect((gate as any)[fn], fn).to.equal(undefined);
+    }
   });
 
   it('refuses circuit version 0', async () => {
@@ -223,7 +226,7 @@ describe('PviumIdentity', function () {
     const gate = await deployIdentityProof(verifierAddress, x, y);
     const claim = await gate.verifyAttestation(proof, publicInputs);
     expect(claim.identityType).to.equal(BigInt(IDENTITY_TYPE_EMAIL));
-    expect(claim.recipient).to.equal('0x0000000000000000000000000000000000000001');
+    expect(claim.wallet).to.equal(SAMPLE_WALLET);
     expect(claim.iat).to.equal(1789240094n);
     expect(claim.identityHash).to.equal(
       sha256(Buffer.from(HASH_PREFIX), Buffer.from([IDENTITY_TYPE_EMAIL]), Buffer.from('test-9988@privy.io')),
@@ -316,5 +319,68 @@ describe('PviumIdentity developer API', function () {
     const bytes = ethers.getBytes(proof);
     bytes[300] ^= 0x01;
     await expect(gate.verifyIdentity(ethers.hexlify(bytes), publicInputs, IDENTITY_TYPE_EMAIL, ethers.toUtf8Bytes(EMAIL), SAMPLE_WALLET)).to.be.reverted;
+  });
+});
+
+/**
+ * What a client (e.g. the Flutter app) does with the attestation JSON the backend returns:
+ * base64 -> bytes, split public inputs into bytes32 words, hash identity + wallet locally, and
+ * make a raw eth_call to verifyIdentityHashes. No raw identity ever reaches the RPC node.
+ */
+describe('eth_call from the backend attestation JSON', function () {
+  this.timeout(120_000);
+
+  const iface = new ethers.Interface([
+    'function verifyIdentityHashes(bytes proof, bytes32[] publicInputs, uint8 identityType, bytes32 identityHash, bytes32 walletHash) view returns (uint64)',
+    'error WalletMismatch()',
+    'error IdentityMismatch()',
+    'error InvalidProof()',
+  ]);
+  let gateAddress: string;
+  let attestation: { proof: string; publicInputs: string; wallet: string; identityType: string; circuitVersion: number };
+
+  before(async () => {
+    const verifierAddress = await (await deployVerifier()).verifier.getAddress();
+    const { x, y } = sampleSignerKey();
+    gateAddress = await (await deployIdentityProof(verifierAddress, x, y)).getAddress();
+    // Exactly the JSON shape http-prover / the Pvium API return.
+    attestation = {
+      proof: readFileSync(join(fixtures, 'email.proof')).toString('base64'),
+      publicInputs: readFileSync(join(fixtures, 'email.public_inputs')).toString('base64'),
+      wallet: SAMPLE_WALLET,
+      identityType: 'email',
+      circuitVersion: 2,
+    };
+  });
+
+  function calldata(identityValue: string, wallet: string): string {
+    const proofBytes = Buffer.from(attestation.proof, 'base64');
+    const piBytes = Buffer.from(attestation.publicInputs, 'base64');
+    const words: string[] = [];
+    for (let i = 0; i < piBytes.length; i += 32) words.push('0x' + piBytes.subarray(i, i + 32).toString('hex'));
+    const identityHash = sha256(Buffer.from(HASH_PREFIX), Buffer.from([IDENTITY_TYPE_EMAIL]), Buffer.from(identityValue.toLowerCase()));
+    const walletHash = sha256(Buffer.from(HASH_PREFIX), Buffer.from([IDENTITY_TYPE_WALLET]), Buffer.from(wallet.toLowerCase()));
+    return iface.encodeFunctionData('verifyIdentityHashes', [proofBytes, words, IDENTITY_TYPE_EMAIL, identityHash, walletHash]);
+  }
+
+  it('selector is stable (hardcoded in the Dart example)', () => {
+    expect(iface.getFunction('verifyIdentityHashes')!.selector).to.equal('0x' + ethers.id('verifyIdentityHashes(bytes,bytes32[],uint8,bytes32,bytes32)').slice(2, 10));
+    console.log(`      selector: ${iface.getFunction('verifyIdentityHashes')!.selector}`);
+  });
+
+  it('raw eth_call verifies and returns issuedAt', async () => {
+    const ret = await ethers.provider.call({ to: gateAddress, data: calldata('test-9988@privy.io', attestation.wallet) });
+    const [issuedAt] = iface.decodeFunctionResult('verifyIdentityHashes', ret);
+    expect(issuedAt).to.equal(1789240094n);
+  });
+
+  it('raw eth_call reverts with a decodable custom error on a wrong wallet', async () => {
+    try {
+      await ethers.provider.call({ to: gateAddress, data: calldata('test-9988@privy.io', '0x899BA183F2c55BF9C627D9Af2984fbdED2E64311') });
+      expect.fail('should have reverted');
+    } catch (e: any) {
+      const data: string = e.data ?? e.info?.error?.data ?? '';
+      expect(iface.parseError(data)?.name).to.equal('WalletMismatch');
+    }
   });
 });

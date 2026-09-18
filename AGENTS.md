@@ -24,13 +24,13 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
 | Folder | Contents |
 | --- | --- |
 | `circuit/` | Noir circuit (`src/`), witness generator (`scripts/`), e2e test + sample token/keys (`test/`) |
-| `contracts/` | Hardhat 2 + ethers v6 project: generated Honk verifier, `PviumIdentity` (dev API), `PviumHash`, `IPviumIdentity` in `src/` |
+| `contracts/` | Hardhat 2 + ethers v6 project: generated Honk verifier, `PviumIdentity` (dev API), `P2IDVault` + `PviumVerifier`; `src/interfaces/`, `src/lib/PviumHash.sol` |
 | `sdks/node/` | npm package `@pvium/zk-verifier` (bb.js verifier + claim decoding). `sdks/python`, `sdks/go` later |
 | `http-prover/` | Attestation service (Express 5, `--env-file=.env`, noir_js solve, native `bb` prove). `yarn sync` copies circuit artifacts |
 
 ## Workflow rules
 
-- `contracts/src/PviumIdentityVerifier.sol` is **generated** by `bb write_solidity_verifier`.
+- `contracts/src/PviumZKVerifier.sol` (contract `PviumZKVerifier`, renamed from bb's `HonkVerifier` by the refresh script) is **generated** by `bb write_solidity_verifier`.
   Never hand-edit it. After any circuit change: `nargo compile`, `nargo execute`, `bb prove`,
   then `yarn fixtures` in `contracts/` to refresh test fixtures and the verifier, and `yarn sync`
   in `sdks/node/` to refresh its bundled vk and fixtures.
@@ -46,7 +46,7 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
   diffs their output byte for byte. Change both together. `@noir-lang/noir_js` in `http-prover/` is pinned
   to the nargo version (`1.0.0-beta.22`).
 - Hash/normalisation rules must stay identical in four places: `circuit/src/main.nr` + `identity.nr`,
-  `circuit/scripts/gen_prover.py`, `contracts/src/PviumHash.sol`, `sdks/node/src/identity.ts`.
+  `circuit/scripts/gen_prover.py`, `contracts/src/lib/PviumHash.sol`, `sdks/node/src/identity.ts`.
 - `@aztec/bb.js` in `sdks/node` must be pinned to the same version as the installed `bb`
   (`5.0.0-nightly.20260522`): proofs and vks are not portable across versions.
 - The identity-hash domain prefix is `p2id.identity.v1`. Prefixes are dot-separated

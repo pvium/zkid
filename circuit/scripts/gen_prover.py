@@ -2,7 +2,7 @@
 """Build Prover.toml for the pvium_identity circuit.
 
 Usage:
-  gen_prover.py --jwt <token> --pubkey <signer.pem> --type email --value test-9988@privy.io [--recipient 0x..] [-o Prover.toml]
+  gen_prover.py --jwt <token> --pubkey <signer.pem> --type email --value test-9988@privy.io [--wallet 0x..] [-o Prover.toml]
   gen_prover.py --jwt <token> --pubkey <signer.pem> --type github_oauth --value dephizee
 
 The token must be a real ES256-signed JWT: the circuit verifies its signature against the
@@ -155,7 +155,6 @@ def main():
     ap.add_argument("--pubkey", required=True, help="PEM (SPKI) file with the signer's P-256 public key")
     ap.add_argument("--type", required=True, choices=TYPES.keys())
     ap.add_argument("--value", required=True)
-    ap.add_argument("--recipient", default="0x0000000000000000000000000000000000000001")
     ap.add_argument("--wallet", help="optional: also prove this linked wallet address (second slot)")
     ap.add_argument("-o", "--out", default="Prover.toml")
     a = ap.parse_args()
@@ -192,12 +191,19 @@ def main():
     # Locate the identity's account object, and optionally the wallet's, inside that string.
     acct_start, acct_end, type_idx, value_idx = locate_account(payload, la_value_start, la_end, a.type, key, value)
     wallet = (0, 0, 0, 0, 0)
+    # Public `wallet` input: the EVM address as a field, which the circuit checks against the
+    # 0x-hex value it reads from the token. Zero for base58 wallets or no wallet slot.
+    wallet_field = 0
     if a.wallet:
         wid, wkey, _ = TYPES["wallet"]
         wv = a.wallet.encode()
         if not 1 <= len(wv) <= MAX_VALUE_LEN:
             raise SystemExit("wallet length out of range")
         wallet = locate_account(payload, la_value_start, la_end, "wallet", wkey, wv) + (len(wv),)
+        if a.wallet.lower().startswith("0x"):
+            if len(a.wallet) != 42:
+                raise SystemExit("EVM wallet must be 0x + 40 hex chars")
+            wallet_field = int(a.wallet, 16)
 
     iat_idx = find_top_level(payload, in_string, b'"iat":')
     iat = int(payload[iat_idx + 6:iat_idx + 16])
@@ -223,7 +229,7 @@ def main():
         f'wallet_value_idx = "{wallet[3]}"',
         f'wallet_value_len = "{wallet[4]}"',
         f'identity_type = "{type_id}"',
-        f'recipient = "{a.recipient}"',
+        f'wallet = "{wallet_field:#x}"',
     ]
     with open(a.out, "w") as f:
         f.write("\n".join(lines) + "\n")

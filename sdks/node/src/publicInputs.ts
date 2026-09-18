@@ -6,7 +6,7 @@ export const PUBLIC_INPUT_COUNT = 11;
 /** Positions in the public input array (see circuit/src/main.nr). */
 export const PI = {
   identityType: 0,
-  recipient: 1,
+  wallet: 1,
   signerXHi: 2,
   signerXLo: 3,
   signerYHi: 4,
@@ -26,8 +26,11 @@ export interface P256PublicKey {
 /** What a proof asserts, decoded from its public inputs. */
 export interface IdentityClaim {
   identityType: number;
-  /** 20-byte address the proof is bound to, lowercase hex. */
-  recipient: `0x${string}`;
+  /**
+   * EVM address of the wallet linked in the same token, lowercase hex, checked in-circuit
+   * against the address read from the token. Null for a non-EVM wallet or no wallet.
+   */
+  wallet: `0x${string}` | null;
   /** P-256 public key the token was signed with. */
   signer: P256PublicKey;
   /**
@@ -74,7 +77,7 @@ export function decodeClaim(inputs: PublicInputs): IdentityClaim {
   const hex32 = (v: bigint): `0x${string}` => `0x${v.toString(16).padStart(64, '0')}`;
   return {
     identityType: Number(f[PI.identityType]),
-    recipient: `0x${f[PI.recipient].toString(16).padStart(40, '0')}`,
+    wallet: f[PI.wallet] === 0n ? null : `0x${f[PI.wallet].toString(16).padStart(40, '0')}`,
     signer: { x: join(f[PI.signerXHi], f[PI.signerXLo]), y: join(f[PI.signerYHi], f[PI.signerYLo]) },
     iat: Number(f[PI.iat]),
     identityHash: hex32(join(f[PI.identityHashHi], f[PI.identityHashLo])),

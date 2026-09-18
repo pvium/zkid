@@ -9,9 +9,8 @@ export interface AttestationRequest {
   identityType: IdentityTypeName;
   identityValue: string;
   jwt: string;
-  /** Linked wallet to bind. Required for attestations; omit only for escrow-claim proofs. */
+  /** Linked wallet to bind (proves identity and wallet belong to the same Privy user). */
   wallet?: string;
-  recipient?: string;
   /** Circuit version to prove for. Omit for the latest; this prover serves exactly one. */
   version?: number;
   /**
@@ -71,7 +70,7 @@ export class AttestationService {
     const token = parseToken(req.jwt);
     const signer = await authenticate(token, this.cfg.signer); // fails fast on bad tokens
     const { inputs, iat } = buildWitness(
-      { token, signer, identityType: req.identityType, identityValue: req.identityValue, wallet: req.wallet, recipient: req.recipient },
+      { token, signer, identityType: req.identityType, identityValue: req.identityValue, wallet: req.wallet },
       normalizeLowS(token.signature),
     );
     const { proof, publicInputs } = await this.prover.prove(inputs);
@@ -99,7 +98,6 @@ function validate(req: AttestationRequest): void {
   if (typeof req.identityValue !== 'string' || req.identityValue.length === 0) throw new InputError('identityValue is required');
   if (typeof req.jwt !== 'string' || req.jwt.length === 0) throw new InputError('jwt is required');
   if (req.wallet !== undefined && (typeof req.wallet !== 'string' || req.wallet.length === 0)) throw new InputError('wallet must be a non-empty string');
-  if (req.recipient !== undefined && !/^0x[0-9a-fA-F]{1,64}$/.test(req.recipient)) throw new InputError('recipient must be a hex field');
   if (req.version !== undefined && (!Number.isInteger(req.version) || req.version < 1)) throw new InputError('version must be a positive integer');
   if (req.callbackUrl !== undefined && typeof req.callbackUrl !== 'string') throw new InputError('callbackUrl must be a string');
 }

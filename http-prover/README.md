@@ -144,6 +144,18 @@ half to `~/.ssh/authorized_keys` on the VPS, store the private half as a secret,
 the protected environment only, review every change
 under `.github/` (see `CODEOWNERS`), and pin third-party actions to commit SHAs before relying on this.
 
+## Logging
+
+One line per request on stdout, plus one per callback delivery attempt:
+
+```
+2026-09-14T10:00:00.000Z POST /attestations 202 14ms ip=203.0.113.7 mode=async type=email wallet=0x… job=3f2c…
+2026-09-14T10:00:09.100Z job 3f2c… ok type=email wallet=0x… callback=api.example.com delivery=delivered
+```
+
+The token and the identity value are never logged. PM2 and Railway both collect stdout; on a VPS
+install `pm2-logrotate` to cap file sizes.
+
 ## Security notes
 
 - The token is a bearer credential for the user's Privy session. It is never logged, and the

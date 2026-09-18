@@ -14,11 +14,11 @@ When you resolve an identity through Pvium you get back an attestation: a zero-k
 its public inputs, and the wallet address it binds. Verify it locally:
 
 ```ts
-import { verifyIdentity } from '@pvium/zk-verifier';
+import { verifyIdentity, AttestationSigner } from '@pvium/zk-verifier';
 
 const result = await verifyIdentity({
   attestation,                        // { proof, publicInputs, wallet, circuitVersion } as returned by Pvium
-  signer: { jwksUrl: 'https://auth.privy.io/api/v1/apps/<pvium-app-id>/jwks.json' }, // or a pinned PEM
+  signer: AttestationSigner.Production, // or .Sandbox, a JWKS URL, a PEM; see "Trusted signers"
   identityType: 'email',              // Privy account type: 'email', 'github_oauth', 'twitter_oauth', …
   identityValue: 'you@example.com',   // the identity you asked Pvium to resolve
 });
@@ -39,14 +39,55 @@ comparison itself; you only supply what you asked for and what you got back.
 **Freshness is your policy.** `issuedAt` is the attestation time. A claim flow might require it
 within the last hour; a payment lookup might accept 30 days. The SDK does not enforce an age.
 
-`signer` is the trust anchor. Pin the PEM from the Privy dashboard in your code, or point at a
-JWKS URL you trust; with a JWKS every P-256 key served is accepted, which covers rotation.
+## Trusted signers
+
+`signer` is the trust anchor: whose token signature the attestation must carry.
+
+| `signer` | Use |
+| --- | --- |
+| `AttestationSigner.Production` (or `'production'`) | Pvium's production Privy app. Keys are pinned in the SDK (`PVIUM_ENVIRONMENTS.production.keys`), so verification needs no network call; the app's JWKS is consulted only if an attestation names a key that was rotated in after this SDK release. |
+| `AttestationSigner.Sandbox` (or `'sandbox'`) | Same for Pvium's sandbox app. A sandbox attestation never verifies as `'production'`, and vice versa. |
+| a JWKS URL string, or `{ jwksUrl }` | Any JWKS; every P-256 key it serves is accepted. For self-hosted provers with your own Privy app. |
+| PEM string or `{ x, y }` | One specific key you control. |
+
+`PVIUM_ENVIRONMENTS` is exported so you can read the app ids, JWKS URLs and pinned keys. Keys
+rotated *out* by Privy stay trusted until an SDK release drops them; keys rotated *in* are picked
+up live. Upgrade the SDK when Pvium announces a key change.
+
+## With the Pvium SDK
+
+Resolving payees with `@pvium/sdk` returns an attestation summary per identity-addressed payee;
+`payouts.getAttestation` fetches the proof and the result is exactly what `verifyIdentity` takes:
+
+```ts
+import { PviumClient } from '@pvium/sdk';
+import { verifyIdentity, AttestationSigner } from '@pvium/zk-verifier';
+
+const pvium = new PviumClient({ apiKey: process.env.PVIUM_API_KEY!, environment: 'production' });
+const { resolved } = await pvium.payouts.resolveRecipients(batchId, payees);
+
+for (const r of resolved.filter((r) => r.attestation)) {
+  const attestation = await pvium.payouts.getAttestation(r.attestation!);
+  const result = await verifyIdentity({
+    attestation,
+    signer: AttestationSigner.Production,
+    identityType: attestation.identityType,   // Privy type, no mapping
+    identityValue: r.identityValue!,
+  });
+  if (!result.valid) throw new Error(`${r.identityValue}: ${result.reason}`);
+  // result.wallet is r.receiver, proven; result.issuedAt is the attestation time (your policy)
+}
+```
+
+Payees with `attestation: null` are wallet payees or identities whose proof is still being
+generated; re-resolve later or apply your own policy.
 
 ## Exports
 
 | Export | Purpose |
 | --- | --- |
 | `verifyIdentity(input)` | the check above |
+| `AttestationSigner` | `Production` / `Sandbox` typed signer choice |
 | `IdentityType` | enum of identity ids, if you prefer it over the string names |
 | `shutdown()` | release the WASM verifier when your process is done |
 | `CIRCUIT_VERSION`, `VK_SHA256` | the circuit version this release verifies, and its vk hash |
@@ -59,7 +100,7 @@ The same check on chain. The package ships the contract sources, so import them 
 import OpenZeppelin:
 
 ```solidity
-import {IPviumIdentity} from "@pvium/zk-verifier/contracts/IPviumIdentity.sol";
+import {IPviumIdentity} from "@pvium/zk-verifier/contracts/interfaces/IPviumIdentity.sol";
 
 contract PayByEmail {
     IPviumIdentity constant PVIUM = IPviumIdentity(0x…); // Pvium's deployment on this chain

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {IVerifier} from "./PviumIdentityVerifier.sol";
-import {IPviumIdentity} from "./IPviumIdentity.sol";
-import {PviumHash} from "./PviumHash.sol";
+import {IVerifier} from "./PviumZKVerifier.sol";
+import {IPviumIdentity} from "./interfaces/IPviumIdentity.sol";
+import {PviumHash} from "./lib/PviumHash.sol";
 
 /// @title PviumIdentity
-/// @notice On-chain verifier for Pvium attestations. Deployed once per chain by Pvium with the
-///         Honk verifier and the P-256 key Privy signs the Pvium app's tokens with. Developers
-///         call it through IPviumIdentity.
+/// @notice On-chain verifier for Pvium attestations. Fully immutable: one deployment per
+///         (circuit version, Privy signing key), with no owner and nothing to update. A Privy key
+///         rotation or a new circuit build is a new deployment (plus a new PviumVerifier), which
+///         the P2ID vault factory registers alongside the old one; nobody can ever add a key that
+///         forges proofs to an existing deployment. Developers call it through IPviumIdentity.
 /// @dev Public input layout emitted by circuit/src/main.nr:
-///        [0] identity_type   [1] recipient
+///        [0] identity_type   [1] wallet (EVM address checked in-circuit against the token; 0 if none)
 ///        [2] signer_x_hi     [3] signer_x_lo     [4] signer_y_hi   [5] signer_y_lo
 ///        [6] iat             [7] identity_hash_hi  [8] identity_hash_lo
 ///        [9] wallet_hash_hi  [10] wallet_hash_lo  (zero when the proof carries no wallet)
@@ -26,12 +28,14 @@ contract PviumIdentity is IPviumIdentity {
     uint256 public immutable signerX;
     uint256 public immutable signerY;
 
-    /// @notice Everything an attestation asserts, for Pvium's own contracts (e.g. escrow claims
-    ///         that need `recipient`). Developers should use the IPviumIdentity functions.
+    /// @notice Everything an attestation asserts, for Pvium's own contracts (e.g. vault claims
+    ///         that pay `wallet`). Developers should use the IPviumIdentity functions.
     struct Attestation {
         uint8 identityType;
-        /// Address bound into the proof by the prover (a claim recipient), or zero.
-        address recipient;
+        /// EVM address of the wallet linked in the same token. The circuit decodes it from the
+        /// signed token and asserts equality, so it is never prover-chosen. Zero when the proof
+        /// carries no wallet or the wallet is not an EVM address (then only walletHash is set).
+        address wallet;
         /// When Privy issued the token (unix seconds). Freshness policy is the caller's.
         uint64 iat;
         bytes32 identityHash;
@@ -39,6 +43,7 @@ contract PviumIdentity is IPviumIdentity {
         bytes32 walletHash;
     }
 
+    error InvalidVerifier();
     error InvalidProof();
     error UnknownSigner(bytes32 x, bytes32 y);
     error WrongPublicInputCount(uint256 got);
@@ -50,6 +55,7 @@ contract PviumIdentity is IPviumIdentity {
     error WalletMismatch();
 
     constructor(IVerifier _verifier, uint16 _circuitVersion, uint256 _signerX, uint256 _signerY) {
+        if (address(_verifier).code.length == 0) revert InvalidVerifier();
         if (!_isOnCurve(_signerX, _signerY)) revert InvalidPublicKey();
         if (_circuitVersion == 0) revert InvalidCircuitVersion();
         verifier = _verifier;
@@ -135,7 +141,7 @@ contract PviumIdentity is IPviumIdentity {
         bytes32 y = _join(publicInputs[4], publicInputs[5]);
         if (uint256(x) != signerX || uint256(y) != signerY) revert UnknownSigner(x, y);
         a.identityType = uint8(uint256(publicInputs[0]));
-        a.recipient = address(uint160(uint256(publicInputs[1])));
+        a.wallet = address(uint160(uint256(publicInputs[1])));
         a.iat = uint64(uint256(publicInputs[6]));
         a.identityHash = _join(publicInputs[7], publicInputs[8]);
         a.walletHash = _join(publicInputs[9], publicInputs[10]);

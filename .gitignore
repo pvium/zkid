@@ -66,3 +66,7 @@ sdks/go/bin/
 # --- misc -----------------------------------------------------------------------
 *.log
 tmp/
+
+# --- Dart example (contracts/examples/dart) -------------------------------------
+contracts/examples/dart/.dart_tool/
+contracts/examples/dart/pubspec.lock

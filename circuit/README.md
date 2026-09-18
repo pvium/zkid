@@ -55,7 +55,7 @@ another claim. Nested braces are rejected so type and value must come from the s
 | Name | Kind | Meaning |
 | --- | --- | --- |
 | `identity_type` | public input (u8) | Id from `identity.nr` (0 = email, 5 = github_oauth, 12 = wallet, …) |
-| `recipient` | public input (Field) | Unconstrained; binds e.g. the claim address to the proof |
+| `wallet` | public input (Field) | EVM address of the wallet slot's account; the circuit decodes the `0x…` value it read from the token and asserts equality. Zero for base58 wallets or no wallet slot |
 | `signature` | private | ES256 `r ‖ s` from the token, **normalised to low-s** (see below) |
 | `signer_x`, `signer_y` | private | P-256 public key coordinates the token was signed with |
 | `signer_x_hi/lo`, `signer_y_hi/lo` | public output | those coordinates, each split into two 128-bit halves |
@@ -66,7 +66,7 @@ another claim. Nested braces are rejected so type and value must come from the s
 | `wallet_hash_hi/lo` | public output | `sha256(prefix ‖ 12 ‖ normalize(address))` for that wallet, or zero |
 
 Everything else (`signing_input`, indexes into the decoded payload, `value_len`) is private.
-Public inputs are ordered `identity_type, recipient, signer_x_hi, signer_x_lo, signer_y_hi, signer_y_lo, iat,
+Public inputs are ordered `identity_type, wallet, signer_x_hi, signer_x_lo, signer_y_hi, signer_y_lo, iat,
 identity_hash_hi, identity_hash_lo, wallet_hash_hi, wallet_hash_lo` (11 fields) for the Solidity verifier.
 
 ## Limits
@@ -96,7 +96,7 @@ python3 scripts/gen_prover.py --jwt "$(cat test/fixtures/sample_token.jwt)" --pu
 
 nargo execute witness            # prints the public outputs; compare with the script's "expected" block
 bb prove -b target/pvium_identity.json -w target/witness.gz -t evm --write_vk --verify -o target/proof
-bb write_solidity_verifier -k target/proof/vk -o ../contracts/src/PviumIdentityVerifier.sol
+bb write_solidity_verifier -k target/proof/vk -o ../contracts/src/PviumZKVerifier.sol
 ```
 
 ## Anchoring (audit fix)
@@ -126,7 +126,7 @@ the witness. `gen_prover.py` does this in `normalize_low_s`; the TS and Go prove
 - Compare `(signer_x, signer_y)` against the Privy app's verification key. The signature is
   already verified in-circuit.
 - A maximum age on `iat`: the circuit reports when Privy attested the claim and enforces nothing.
-- `recipient == msg.sender` (or the intended beneficiary).
+- Pay or bind only `wallet` (or the wallet whose hash equals `wallet_hash`); both come from the signed token.
 - Derive the routing address from `identity_hash` (e.g. as a CREATE2 salt) and compute it the
   same way on the payer side: lowercase the value for every type except `wallet`, prepend the
   type byte and the `p2id.identity.v1` prefix, SHA-256.
