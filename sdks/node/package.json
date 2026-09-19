@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./p2id": {
+      "types": "./dist/p2id.d.ts",
+      "import": "./dist/p2id.js",
+      "default": "./dist/p2id.js"
+    },
     "./contracts/*": "./contracts/*"
   },
   "files": [

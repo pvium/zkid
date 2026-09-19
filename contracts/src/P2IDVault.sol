@@ -8,9 +8,13 @@ import {IP2IdVaultFactory} from "./interfaces/IP2IdVaultFactory.sol";
 
 /// @title P2IDVault
 /// @notice A namespace-bound vault that holds ERC-20 funds until the identity owner claims them.
-/// @dev **A bare ERC-20 transfer to this contract is irrevocable: it records no funder, has no
-///      refund path, and is claimable only through the factory's default verifier.** Use fund()
-///      when refund rights, a funding constraint, or a specific verifier are required.
+/// @dev Holds ERC-20 tokens and the chain's native coin (BNB, ETH), the latter identified by
+///      token == NATIVE (address(0)) everywhere: in deposits, buckets, sweeps, fees and views.
+///
+///      **A bare transfer to this contract (ERC-20 transfer, or plain native send) is irrevocable:
+///      it records no funder, has no refund path, and is claimable only through the factory's
+///      default verifier.** Use fund() when refund rights, a funding constraint, or a specific
+///      verifier are required.
 ///
 ///      This contract holds mechanics only; everything expected to evolve is decided by the
 ///      factory's policy (IP2IDPolicy), consulted on every call, so it can change without
@@ -61,6 +65,8 @@ import {IP2IdVaultFactory} from "./interfaces/IP2IdVaultFactory.sol";
 contract P2IDVault is IP2IDVault {
     /// @notice Hard cap on the fee any policy can charge on a payout: 1%. Part of this bytecode.
     uint16 public constant MAX_FEE_BPS = 100;
+    /// @notice The token address that stands for the chain's native coin (BNB on BNB Chain).
+    address public constant NATIVE = address(0);
     uint256 private constant BPS = 10_000;
     /// @dev Gas given to optional policy/verifier queries, so a misbehaving contract cannot burn
     ///      the caller's gas; a query that fails or runs out is treated as "no fee" / "unsupported".
@@ -120,6 +126,8 @@ contract P2IDVault is IP2IDVault {
     error AmountTooLarge();
     error Reentrancy();
     error FeeOverdrawn();
+    error NativeValueMismatch();
+    error NativeTransferFailed();
 
     /// @dev No constructor arguments, so the creation code is identical for every vault and
     ///      `keccak256(creationCode)` is a constant anyone can use to derive an identity's vault
@@ -127,6 +135,11 @@ contract P2IDVault is IP2IDVault {
     constructor() {
         factory = msg.sender;
     }
+
+    /// @notice Plain native-coin sends (e.g. fee payouts from a launchpad) are accepted as direct
+    ///         transfers: untracked, claimable through the default verifier, never refundable.
+    ///         Deliberately empty, so it works with the 2300-gas stipend of `transfer`/`send`.
+    receive() external payable {}
 
     /// @notice Set by the factory once, immediately after deployment.
     function initialize(
@@ -147,6 +160,8 @@ contract P2IDVault is IP2IDVault {
     // ------------------------------------------------------------------ funding
 
     /// @notice Fund under the factory's default verifier.
+    /// @param token NATIVE for the native coin (send it as msg.value, equal to `amount`), otherwise
+    ///        an ERC-20 pulled with transferFrom (approve first; send no value).
     /// @param constraint Opaque bytes32 the verifier must see satisfied before this deposit can
     ///        be swept (e.g. a screening commitment); bytes32(0) for the default bucket.
     function fund(
@@ -154,23 +169,24 @@ contract P2IDVault is IP2IDVault {
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external nonReentrant returns (uint256 depositId) {
+    ) external payable nonReentrant returns (uint256 depositId) {
         return _fund(msg.sender, defaultVerifier(), token, amount, constraint, refundWindow);
     }
 
-    /// @notice Fund under any verifier the factory's policy allows.
+    /// @notice Fund under any verifier the factory's policy allows. Native coin as in fund().
     function fundWith(
         address verifier,
         address token,
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external nonReentrant returns (uint256 depositId) {
+    ) external payable nonReentrant returns (uint256 depositId) {
         return _fund(msg.sender, verifier, token, amount, constraint, refundWindow);
     }
 
     /// @notice Factory-only: fund on behalf of `funder`, who keeps the refund right. Tokens are
-    ///         pulled from the factory, which has already collected them from `funder`.
+    ///         pulled from the factory, which has already collected them from `funder`; native
+    ///         coin arrives as msg.value.
     function fundFor(
         address funder,
         address verifier,
@@ -178,13 +194,14 @@ contract P2IDVault is IP2IDVault {
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external nonReentrant onlyFactory returns (uint256 depositId) {
+    ) external payable nonReentrant onlyFactory returns (uint256 depositId) {
         if (funder == address(0)) revert InvalidWallet();
         return _fund(funder, verifier, token, amount, constraint, refundWindow);
     }
 
-    /// @dev Pull `amount` of `token` from msg.sender and record a deposit owned by `funder`, with
-    ///      the fee rate the policy quotes now (capped) fixed for it.
+    /// @dev Take `amount` of `token` from msg.sender (native: exactly msg.value; ERC-20: pulled,
+    ///      crediting what actually arrived) and record a deposit owned by `funder`, with the fee
+    ///      rate the policy quotes now (capped) fixed for it.
     function _fund(
         address funder,
         address verifier,
@@ -194,16 +211,23 @@ contract P2IDVault is IP2IDVault {
         uint64 refundWindow
     ) private onlyAllowed(verifier) returns (uint256 depositId) {
         if (constraint != bytes32(0) && !_supportsConstraints(verifier)) revert ConstraintsUnsupported(verifier);
-        if (token.code.length == 0) revert InvalidToken();
         if (refundWindow < minRefundWindow || refundWindow > maxRefundWindow) revert InvalidRefundWindow();
         if (amount == 0 || amount > type(uint128).max) revert InvalidRefundAmount();
 
-        uint256 beforeBalance = _balanceOf(token);
-        _callToken(token, abi.encodeWithSignature("transferFrom(address,address,uint256)", msg.sender, address(this), amount));
-        uint256 afterBalance = _balanceOf(token);
-        if (afterBalance <= beforeBalance) revert InvalidRefundAmount();
-        uint256 credited = afterBalance - beforeBalance;
-        if (credited > type(uint128).max) revert AmountTooLarge();
+        uint256 credited;
+        if (token == NATIVE) {
+            if (msg.value != amount) revert NativeValueMismatch();
+            credited = amount;
+        } else {
+            if (msg.value != 0) revert NativeValueMismatch(); // never strand native coin on an ERC-20 deposit
+            if (token.code.length == 0) revert InvalidToken();
+            uint256 beforeBalance = _balanceOf(token);
+            _callToken(token, abi.encodeWithSignature("transferFrom(address,address,uint256)", msg.sender, address(this), amount));
+            uint256 afterBalance = _balanceOf(token);
+            if (afterBalance <= beforeBalance) revert InvalidRefundAmount();
+            credited = afterBalance - beforeBalance;
+            if (credited > type(uint128).max) revert AmountTooLarge();
+        }
 
         uint16 feeBps = _quoteFeeBps(verifier, token);
         depositId = deposits.length;
@@ -346,13 +370,19 @@ contract P2IDVault is IP2IDVault {
         uint256 owed = feesOwed[verifier][token];
         if (owed == 0) return 0;
         address pol = policy();
-        uint256 before = _balanceOf(token);
-        _callToken(token, abi.encodeWithSignature("approve(address,uint256)", pol, owed));
-        IP2IDPolicy(pol).distributeFee(verifier, token, owed);
-        _callToken(token, abi.encodeWithSignature("approve(address,uint256)", pol, 0));
-        uint256 afterBalance = _balanceOf(token);
-        amount = before > afterBalance ? before - afterBalance : 0;
-        if (amount > owed) revert FeeOverdrawn();
+        if (token == NATIVE) {
+            // Native coin cannot be pulled: it is sent along with the call, exactly the amount owed.
+            IP2IDPolicy(pol).distributeFee{value: owed}(verifier, token, owed);
+            amount = owed;
+        } else {
+            uint256 before = _balanceOf(token);
+            _callToken(token, abi.encodeWithSignature("approve(address,uint256)", pol, owed));
+            IP2IDPolicy(pol).distributeFee(verifier, token, owed);
+            _callToken(token, abi.encodeWithSignature("approve(address,uint256)", pol, 0));
+            uint256 afterBalance = _balanceOf(token);
+            amount = before > afterBalance ? before - afterBalance : 0;
+            if (amount > owed) revert FeeOverdrawn();
+        }
         feesOwed[verifier][token] = owed - amount;
         feesOwedTotal[token] -= amount;
         emit FeesDistributed(verifier, token, amount, pol);
@@ -583,11 +613,19 @@ contract P2IDVault is IP2IDVault {
 
     // ------------------------------------------------------------------ tokens
 
+    /// @dev Pay out `amount` of `token`; native coin goes with all remaining gas (every caller
+    ///      holds the reentrancy lock), so smart-contract wallets can receive it.
     function _transfer(address token, address to, uint256 amount) private {
-        _callToken(token, abi.encodeWithSignature("transfer(address,uint256)", to, amount));
+        if (token == NATIVE) {
+            (bool ok, ) = payable(to).call{value: amount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else {
+            _callToken(token, abi.encodeWithSignature("transfer(address,uint256)", to, amount));
+        }
     }
 
     function _balanceOf(address token) private view returns (uint256 balance) {
+        if (token == NATIVE) return address(this).balance;
         (bool ok, bytes memory data) = token.staticcall(abi.encodeWithSignature("balanceOf(address)", address(this)));
         if (!ok || data.length != 32) revert TokenBalanceQueryFailed();
         balance = abi.decode(data, (uint256));

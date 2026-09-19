@@ -199,7 +199,7 @@ describe('PviumIdentity', function () {
     expect(await gate.isSignerKey(x, y)).to.equal(true);
     expect(await gate.signerKeyCount()).to.equal(1n);
     expect(await gate.verifier()).to.equal(verifierAddress);
-    expect(await gate.circuitVersion()).to.equal(2n);
+    expect(await gate.circuitVersion()).to.equal(1n);
     for (const fn of ['configure', 'addSignerKey', 'addCircuit', 'owner', 'transferOwnership']) {
       expect((gate as any)[fn], fn).to.equal(undefined);
     }
@@ -210,7 +210,7 @@ describe('PviumIdentity', function () {
     const gx = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n; // P-256 generator: a valid point
     const gy = 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n;
     // the Privy JWKS lists several keys; the token's key may be any of them, in any position
-    const gate = await deployIdentityProof(verifierAddress, gx, gy, 2, [{ x, y }]);
+    const gate = await deployIdentityProof(verifierAddress, gx, gy, 1, [{ x, y }]);
     expect(await gate.signerKeyCount()).to.equal(2n);
     expect((await gate.verifyAttestation(proof, publicInputs)).iat).to.equal(1789240094n);
     const factory = await ethers.getContractFactory('PviumIdentity');
@@ -363,7 +363,7 @@ describe('eth_call from the backend attestation JSON', function () {
       publicInputs: readFileSync(join(fixtures, 'email.public_inputs')).toString('base64'),
       wallet: SAMPLE_WALLET,
       identityType: 'email',
-      circuitVersion: 2,
+      circuitVersion: 1,
     };
   });
 

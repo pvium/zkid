@@ -49,7 +49,7 @@ contract PviumP2IDPolicy is IP2IDPolicy {
 
     /// @inheritdoc IP2IDPolicy
     /// @dev The launch policy charges no fee, so a vault never has fees for it to distribute.
-    function distributeFee(address, address, uint256) external pure {
+    function distributeFee(address, address, uint256) external payable {
         revert NoFees();
     }
 

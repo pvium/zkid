@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {IP2IDVerifier} from "./interfaces/IP2IDVerifier.sol";
-import {PviumHash} from "./lib/PviumHash.sol";
+import {P2IDHash} from "./lib/P2IDHash.sol";
 import {PviumIdentity} from "./PviumIdentity.sol";
 
 /// @title PviumVerifier
@@ -65,7 +65,7 @@ contract PviumVerifier is IP2IDVerifier {
         PviumIdentity.Attestation memory a = pviumIdentity.verifyAttestation(zkProof, publicInputs);
         if (a.identityHash != identityHash) revert IdentityMismatch();
         if (a.wallet == address(0)) revert NoEvmWallet();
-        if (PviumHash.walletHash(a.wallet) != a.walletHash) revert WalletHashMismatch();
+        if (P2IDHash.walletHash(a.wallet) != a.walletHash) revert WalletHashMismatch();
 
         if (constraint.commitment != bytes32(0)) {
             if (constraintSigner == address(0)) revert ConstraintsUnsupported();

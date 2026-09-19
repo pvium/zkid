@@ -24,7 +24,7 @@ export async function deployIdentityProof(
   verifierAddress: string,
   signerX: bigint,
   signerY: bigint,
-  circuitVersion = 2,
+  circuitVersion = 1,
   extraKeys: { x: bigint; y: bigint }[] = [],
 ) {
   const keys = [{ x: signerX, y: signerY }, ...extraKeys];

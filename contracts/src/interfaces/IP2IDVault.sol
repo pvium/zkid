@@ -4,7 +4,8 @@ pragma solidity ^0.8.27;
 import {IP2IDVerifier} from "./IP2IDVerifier.sol";
 
 /// @title IP2IDVault
-/// @notice A vault holding ERC-20 funds for one identity until its owner proves it and sweeps.
+/// @notice A vault holding ERC-20 tokens and the native coin for one identity until its owner
+///         proves it and sweeps. The native coin is the token address(0) in every function.
 ///         Every deposit names the verifier whose proofs can release it; the factory's policy
 ///         decides which verifiers are allowed and what (capped) fee applies.
 interface IP2IDVault {
@@ -49,11 +50,11 @@ interface IP2IDVault {
 
     // funding
     /// @notice Fund under the factory's default verifier.
-    function fund(address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external returns (uint256 depositId);
+    function fund(address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external payable returns (uint256 depositId);
     /// @notice Fund under any verifier the factory's policy allows.
-    function fundWith(address verifier, address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external returns (uint256 depositId);
+    function fundWith(address verifier, address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external payable returns (uint256 depositId);
     /// @notice Factory-only: record a deposit owned by `funder`; tokens are pulled from the factory.
-    function fundFor(address funder, address verifier, address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external returns (uint256 depositId);
+    function fundFor(address funder, address verifier, address token, uint256 amount, bytes32 constraint, uint64 refundWindow) external payable returns (uint256 depositId);
     function refund(uint256 depositId) external;
 
     // proofs
@@ -76,6 +77,8 @@ interface IP2IDVault {
 
     // views
     function MAX_FEE_BPS() external view returns (uint16);
+    /// @notice address(0): the token address standing for the native coin.
+    function NATIVE() external view returns (address);
     function factory() external view returns (address);
     function policy() external view returns (address);
     function defaultVerifier() external view returns (address);

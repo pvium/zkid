@@ -102,6 +102,7 @@ before the vault exists, and is **the same on every EVM chain**, like any wallet
 
 ```ts
 import { p2idAddress, identityHash } from '@pvium/zkid';
+// in a browser, import from '@pvium/zkid/p2id' instead: same functions, without the proof verifier
 
 const to = await p2idAddress({ identityType: 'email', identityValue: 'you@example.com' });
 const salt = await identityHash('email', 'you@example.com'); // the vault's CREATE2 salt / commitment

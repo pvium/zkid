@@ -32,7 +32,7 @@ interface IPviumIdentity {
         string calldata wallet
     ) external view returns (uint64 issuedAt);
 
-    /// @notice Same, with the identity and wallet already hashed (PviumHash), for callers who must
+    /// @notice Same, with the identity and wallet already hashed (P2IDHash), for callers who must
     ///         not put the raw identity in calldata.
     function verifyIdentityHashes(
         bytes calldata proof,

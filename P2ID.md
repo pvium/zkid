@@ -1,13 +1,17 @@
 # P2ID: pay to any identity
 
+P2ID enables AI agents to pay recipients onchain using identities they already know, such as an email address or social handle,
+without asking for a wallet address. Agents can verify identity attestations and derive the
+corresponding payment destination. Derivation requires no prior recipient registration;
+claiming funds requires zero-knowledge proof of control of the identity. Owners claim tokens using any P2ID compatible non-custodial wallet.
+
 P2ID derives deterministic EVM vault addresses from identities: email addresses, social handles,
-phone numbers and wallet addresses. Anyone can derive an address and send ERC-20 tokens to it
-before the vault is deployed. Claims pay a wallet linked to the identity in a Privy identity
-token, verified through a zero-knowledge proof.
+phone numbers and wallet addresses. Anyone can derive an address and send the chain's native
+coin or ERC-20 tokens to it.
 
 This specification defines address derivation, identity encoding, versioning and claim semantics.
-The circuit (`circuit/`), Solidity library (`contracts/src/lib/PviumHash.sol`), prover
-(`http-prover/`) and SDK (`sdks/node/`) must implement the same rules.
+The circuit (`circuit/`), Solidity library (`contracts/src/lib/P2IDHash.sol`), prover
+(`http-prover/`) and SDK (`sdks/node/`) all implement the same rules.
 
 ## Address derivation
 
@@ -20,13 +24,13 @@ identityHash = SHA-256( "p2id.identity.v1" ‖ byte(typeId) ‖ v )
 p2id         = last 20 bytes of Keccak-256( 0xff ‖ factory ‖ identityHash ‖ vaultInitCodeHash )
 ```
 
-| Symbol | Meaning | Size |
-| --- | --- | --- |
-| `"p2id.identity.v1"` | ASCII domain prefix | 16 bytes |
-| `typeId` | identity type id, see the table below | 1 byte |
-| `value` | the identity as UTF-8; lowercasing is ASCII only (`A`–`Z`) | 1–128 bytes |
-| `factory` | `PviumP2IdVaultFactory` address for the scheme and environment | 20 bytes |
-| `vaultInitCodeHash` | Keccak-256 of the `P2IDVault` creation bytecode | 32 bytes |
+| Symbol               | Meaning                                                        | Size        |
+| -------------------- | -------------------------------------------------------------- | ----------- |
+| `"p2id.identity.v1"` | ASCII domain prefix                                            | 16 bytes    |
+| `typeId`             | identity type id, see the table below                          | 1 byte      |
+| `value`              | the identity as UTF-8; lowercasing is ASCII only (`A`–`Z`)     | 1–128 bytes |
+| `factory`            | `PviumP2IdVaultFactory` address for the scheme and environment | 20 bytes    |
+| `vaultInitCodeHash`  | Keccak-256 of the `P2IDVault` creation bytecode                | 32 bytes    |
 
 `‖` denotes byte concatenation. The address formula uses CREATE2 with `identityHash` as the
 salt and is independent of whether the vault has been deployed. Addresses are displayed with
@@ -39,10 +43,10 @@ commitment, binding address derivation and claim verification to one identity.
 
 Identity hashing and vault addressing use independently versioned domains:
 
-| Domain | Versions | Changes when |
-| --- | --- | --- |
+| Domain             | Versions                                             | Changes when                                 |
+| ------------------ | ---------------------------------------------------- | -------------------------------------------- |
 | `p2id.identity.vN` | the identity hash: prefix, type table, normalisation | the commitment changes (needs a new circuit) |
-| `p2id.vault.vN` | the address: `factory` and `vaultInitCodeHash` | the vault bytecode or the factory changes |
+| `p2id.vault.vN`    | the address: `factory` and `vaultInitCodeHash`       | the vault bytecode or the factory changes    |
 
 Each address scheme specifies its identity domain. A vault update can introduce
 `p2id.vault.v2` without changing the circuit or existing proofs. The scheme domain also
@@ -64,8 +68,8 @@ identityHash = SHA-256( "p2id.identity.v1" ‖ 0x00 ‖ "test-9988@privy.io" )
              = 0xbcda0f09fa9732b2bfdea38199486b654a84e8e06085d7e364af8137f8d7deaf
 
 factory           = 0x1111111111111111111111111111111111111111      (illustrative)
-vaultInitCodeHash = 0xe77177c8928780958d3dd9349c9e58ed44081f738fb54dec4e46d043aad778d5
-p2id              = 0xA6aAdfCFEfaD0761490178BD639DBD1f3f895C90
+vaultInitCodeHash = 0x5473d8d97be4ce19602ca8c81568811e3c909673002ce551c11db418c5d5534d
+p2id              = 0x8b63277781EeAe365010573A8061185D96466914
 ```
 
 The identity-hash preimage is 35 bytes:
@@ -88,7 +92,10 @@ With the SDK:
 
 ```ts
 import { p2idAddress } from '@pvium/zkid';
-const to = await p2idAddress({ identityType: 'email', identityValue: 'you@example.com' });
+const to = await p2idAddress({
+  identityType: 'email',
+  identityValue: 'you@example.com',
+});
 ```
 
 ## Identity types
@@ -96,21 +103,21 @@ const to = await p2idAddress({ identityType: 'email', identityValue: 'you@exampl
 An identity is the pair `(type, value)`. Identical values under different types produce
 distinct commitments and addresses; for example, GitHub `octocat` and TikTok `octocat`.
 
-| Id | Type (Privy `linked_accounts[].type`) | Value field | Example value | Lowercased |
-| ---: | --- | --- | --- | :---: |
-| 0 | `email` | `address` | `you@example.com` | yes |
-| 1 | `phone` | `number` | `+15551234567` | no |
-| 2 | `google_oauth` | `email` | `you@gmail.com` | yes |
-| 3 | `twitter_oauth` (X) | `username` | `jack` | yes |
-| 4 | `discord_oauth` | `username` | `wumpus` | yes |
-| 5 | `github_oauth` | `username` | `octocat` | yes |
-| 6 | `linkedin_oauth` | `email` | `you@example.com` | yes |
-| 7 | `apple_oauth` | `email` | `you@icloud.com` | yes |
-| 8 | `telegram` | `username` | `durov` | yes |
-| 9 | `tiktok_oauth` | `username` | `charlidamelio` | yes |
-| 10 | `instagram_oauth` | `username` | `instagram` | yes |
-| 11 | `farcaster` | `username` | `dwr` | yes |
-| 12 | `wallet` | `address` | `0xA01b…0f98`, or a base58 address | only `0x…` |
+|  Id | Type (Privy `linked_accounts[].type`) | Value field | Example value                      | Lowercased |
+| --: | ------------------------------------- | ----------- | ---------------------------------- | :--------: |
+|   0 | `email`                               | `address`   | `you@example.com`                  |    yes     |
+|   1 | `phone`                               | `number`    | `+15551234567`                     |     no     |
+|   2 | `google_oauth`                        | `email`     | `you@gmail.com`                    |    yes     |
+|   3 | `twitter_oauth` (X)                   | `username`  | `jack`                             |    yes     |
+|   4 | `discord_oauth`                       | `username`  | `wumpus`                           |    yes     |
+|   5 | `github_oauth`                        | `username`  | `octocat`                          |    yes     |
+|   6 | `linkedin_oauth`                      | `email`     | `you@example.com`                  |    yes     |
+|   7 | `apple_oauth`                         | `email`     | `you@icloud.com`                   |    yes     |
+|   8 | `telegram`                            | `username`  | `durov`                            |    yes     |
+|   9 | `tiktok_oauth`                        | `username`  | `charlidamelio`                    |    yes     |
+|  10 | `instagram_oauth`                     | `username`  | `instagram`                        |    yes     |
+|  11 | `farcaster`                           | `username`  | `dwr`                              |    yes     |
+|  12 | `wallet`                              | `address`   | `0xA01b…0f98`, or a base58 address | only `0x…` |
 
 Value conventions:
 
@@ -130,7 +137,7 @@ unambiguous type boundary and reduces hashing constraints in the circuit.
 The type table is **append-only**. New types receive the next identifier; existing identifiers
 must never be reassigned or reused, including those of discontinued platforms. The table is defined in
 [`circuit/src/identity.nr`](circuit/src/identity.nr) and mirrored in
-[`contracts/src/lib/PviumHash.sol`](contracts/src/lib/PviumHash.sol),
+[`contracts/src/lib/P2IDHash.sol`](contracts/src/lib/P2IDHash.sol),
 [`sdks/node/src/identity.ts`](sdks/node/src/identity.ts) and
 [`http-prover/src/identity.ts`](http-prover/src/identity.ts).
 
@@ -161,8 +168,10 @@ scheme. SDKs default to production.
    a newer proof updates the recorded wallet and causes older proofs to be rejected under that
    verifier. `refreshProof` permits this update without claiming funds.
 
-Direct ERC-20 transfers create no deposit record or refund right. They are claimed through the
-factory's default verifier. Recorded deposits specify a verifier and may include a constraint
+Direct transfers, of the native coin or ERC-20 tokens, create no deposit record or refund right.
+They are claimed through the factory's default verifier. The native coin (BNB on BNB Chain, ETH on
+Base) is identified as token `address(0)` in every vault function; deposits of it send the amount
+as the call's value. Recorded deposits specify a verifier and may include a constraint
 that must be satisfied to claim; unclaimed deposits can be refunded by their funder after the
 refund window.
 

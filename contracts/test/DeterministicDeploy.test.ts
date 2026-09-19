@@ -19,7 +19,7 @@ describe('Deterministic deployment: chain-agnostic P2ID addresses', function () 
     return {
       owner: '0x00000000000000000000000000000000000A11CE',
       scheme: 'p2id.vault.v1',
-      circuitVersion: 2,
+      circuitVersion: 1,
       signerKeys: [
         { x: BigInt('0x' + Buffer.from(jwk.x!, 'base64url').toString('hex')), y: BigInt('0x' + Buffer.from(jwk.y!, 'base64url').toString('hex')) },
         { x: GX, y: GY },

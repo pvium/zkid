@@ -66,6 +66,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
     error TokenCallFailed();
     error TokenBalanceQueryFailed();
     error NothingReceived();
+    error UnexpectedValue();
 
     constructor(
         address _owner,
@@ -217,7 +218,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external returns (address vault, uint256 depositId) {
+    ) external payable returns (address vault, uint256 depositId) {
         return
             _fund(
                 identityHash,
@@ -237,7 +238,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external returns (address vault, uint256 depositId) {
+    ) external payable returns (address vault, uint256 depositId) {
         return
             _fund(
                 identityHash,
@@ -258,6 +259,11 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
         uint64 refundWindow
     ) private returns (address vault, uint256 depositId) {
         vault = deploy(identityHash);
+        if (token == address(0)) {
+            // Native coin: forward exactly the value sent; the vault checks it equals `amount`.
+            return (vault, P2IDVault(payable(vault)).fundFor{value: msg.value}(msg.sender, verifier, token, amount, constraint, refundWindow));
+        }
+        if (msg.value != 0) revert UnexpectedValue();
         // Collect from the payer (credit what actually arrived, for fee-on-transfer tokens),
         // then let the vault pull exactly that and record the payer as funder.
         uint256 before = _balanceOf(token);
@@ -276,7 +282,7 @@ contract PviumP2IdVaultFactory is IP2IdVaultFactory {
             token,
             abi.encodeWithSignature("approve(address,uint256)", vault, received)
         );
-        depositId = P2IDVault(vault).fundFor(
+        depositId = P2IDVault(payable(vault)).fundFor(
             msg.sender,
             verifier,
             token,

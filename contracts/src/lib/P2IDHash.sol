@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-/// @title PviumHash
+/// @title P2IDHash
 /// @notice The identity commitment exactly as circuit/src/main.nr computes it:
 ///         sha256("p2id.identity.v1" || identityType || normalize(value)).
 ///         `normalize` ASCII-lowercases every type except phone and wallet, and lowercases
 ///         `0x…` (EVM, hex) wallet addresses; base58 (Solana) addresses are untouched.
-library PviumHash {
+library P2IDHash {
     bytes internal constant PREFIX = "p2id.identity.v1";
     uint8 internal constant PHONE = 1;
     uint8 internal constant WALLET = 12;

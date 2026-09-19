@@ -21,14 +21,15 @@ interface IP2IdVaultFactory {
     /// @notice Deploy the vault for `identityHash`; returns the existing one if already deployed.
     function deploy(bytes32 identityHash) external returns (address vault);
     /// @notice Deploy if needed, then fund under the default verifier on the caller's behalf
-    ///         (caller keeps the refund right). Approve this factory once to pay any identity.
+    ///         (caller keeps the refund right). ERC-20: approve this factory once to pay any
+    ///         identity. Native coin: token = address(0), send `amount` as msg.value.
     function fund(
         bytes32 identityHash,
         address token,
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external returns (address vault, uint256 depositId);
+    ) external payable returns (address vault, uint256 depositId);
     /// @notice Same, under a chosen approved verifier.
     function fundWith(
         bytes32 identityHash,
@@ -37,5 +38,5 @@ interface IP2IdVaultFactory {
         uint256 amount,
         bytes32 constraint,
         uint64 refundWindow
-    ) external returns (address vault, uint256 depositId);
+    ) external payable returns (address vault, uint256 depositId);
 }

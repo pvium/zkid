@@ -32,7 +32,7 @@ yarn fixtures   # after re-proving in ../circuit: refresh test fixtures + regene
   when Privy issued the underlying token. Freshness is the caller's policy.
   `verifyAttestation(proof, publicInputs)` is the lower-level form returning every field,
   including the proven `wallet` address, for Pvium's own vault contracts.
-- `src/lib/PviumHash.sol` — the commitment formula (`sha256("p2id.identity.v1" ‖ type ‖ normalize(value))`)
+- `src/lib/P2IDHash.sol` — the commitment formula (`sha256("p2id.identity.v1" ‖ type ‖ normalize(value))`)
   and normalisation rules, byte-for-byte what the circuit and the Node SDK compute.
 - `src/PviumVerifier.sol` — `IP2IDVerifier` backed by `PviumIdentity`: resolves a proof to the
   wallet the circuit read from the token (cross-checked against `walletHash`) and, when a
@@ -132,6 +132,12 @@ deployment salt, so a future `p2id.vault.v2` is a separate stack at separate add
 
 ## Token support in P2IDVault
 
+- The chain's native coin is supported everywhere, as token `address(0)` (`NATIVE`): BNB on BNB
+  Chain, ETH on Base, same bytecode. Plain sends to a vault are accepted as direct transfers (also
+  from contracts paying with the 2300-gas `transfer` stipend), `fund`/`fundWith` and the factory's
+  `fund` are payable for it (`msg.value` must equal `amount`; ERC-20 funding must send no value),
+  and sweeps, refunds and fee distribution pay it out. Payouts forward all gas under the
+  reentrancy lock, so smart-contract wallets can receive them.
 - Fee-on-transfer tokens work: a deposit records what actually arrived, and the payee bears the
   outbound fee.
 - Tokens that return no data, `true`, or revert on failure all work; a `false` return reverts.

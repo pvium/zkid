@@ -85,13 +85,25 @@ contract MockFeePolicy is IP2IDPolicy {
         pullBps = _pullBps;
     }
 
-    function distributeFee(address verifier, address token, uint256 amount) external {
+    function distributeFee(address verifier, address token, uint256 amount) external payable {
         if (mode == 3) revert("distribution down");
+        if (token == address(0)) {
+            // native: the vault sent it along; split msg.value
+            uint256 op = operatorOf[verifier] == address(0) ? 0 : (msg.value * operatorShareBps) / 10_000;
+            if (op != 0) _send(operatorOf[verifier], op);
+            _send(recipient, msg.value - op);
+            return;
+        }
         uint256 pull = mode == 4 ? amount + 1 : (amount * pullBps) / 10_000;
         IERC20Min(token).transferFrom(msg.sender, address(this), pull);
         uint256 toOperator = operatorOf[verifier] == address(0) ? 0 : (pull * operatorShareBps) / 10_000;
         if (toOperator != 0) IERC20Min(token).transfer(operatorOf[verifier], toOperator);
         IERC20Min(token).transfer(recipient, pull - toOperator);
+    }
+
+    function _send(address to, uint256 value) private {
+        (bool ok, ) = payable(to).call{value: value}("");
+        require(ok, "send failed");
     }
 
     function _misbehave() private view {
@@ -100,5 +112,34 @@ contract MockFeePolicy is IP2IDPolicy {
             uint256 x;
             while (true) x++; // runs out of gas, never returns
         }
+    }
+}
+
+/// @dev A wallet that tries to re-enter the vault when it is paid in native coin.
+contract MockReentrantWallet {
+    address public target;
+    bytes public payload;
+
+    function arm(address _target, bytes calldata _payload) external {
+        target = _target;
+        payload = _payload;
+    }
+
+    receive() external payable {
+        if (target != address(0)) {
+            (bool ok, bytes memory ret) = target.call(payload);
+            if (!ok) {
+                assembly {
+                    revert(add(ret, 32), mload(ret))
+                }
+            }
+        }
+    }
+}
+
+/// @dev Pays with Solidity's `transfer`, which forwards only a 2300-gas stipend (as many launchpads do).
+contract MockNativeSender {
+    function send(address payable to) external payable {
+        to.transfer(msg.value);
     }
 }

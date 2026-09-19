@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {IVerifier} from "./PviumZKVerifier.sol";
 import {IPviumIdentity} from "./interfaces/IPviumIdentity.sol";
-import {PviumHash} from "./lib/PviumHash.sol";
+import {P2IDHash} from "./lib/P2IDHash.sol";
 
 /// @title PviumIdentity
 /// @notice On-chain verifier for Pvium attestations. Fully immutable: one deployment per
@@ -42,7 +42,7 @@ contract PviumIdentity is IPviumIdentity {
         /// When Privy issued the token (unix seconds). Freshness policy is the caller's.
         uint64 iat;
         bytes32 identityHash;
-        /// PviumHash.walletHash of a wallet linked in the same token, or 0.
+        /// P2IDHash.walletHash of a wallet linked in the same token, or 0.
         bytes32 walletHash;
     }
 
@@ -96,7 +96,7 @@ contract PviumIdentity is IPviumIdentity {
         address wallet
     ) external view returns (uint64 issuedAt) {
         return _verifyIdentity(
-            proof, publicInputs, identityType, PviumHash.identityHash(identityType, identityValue), PviumHash.walletHash(wallet)
+            proof, publicInputs, identityType, P2IDHash.identityHash(identityType, identityValue), P2IDHash.walletHash(wallet)
         );
     }
 
@@ -109,7 +109,7 @@ contract PviumIdentity is IPviumIdentity {
         string calldata wallet
     ) external view returns (uint64 issuedAt) {
         return _verifyIdentity(
-            proof, publicInputs, identityType, PviumHash.identityHash(identityType, identityValue), PviumHash.walletHash(wallet)
+            proof, publicInputs, identityType, P2IDHash.identityHash(identityType, identityValue), P2IDHash.walletHash(wallet)
         );
     }
 

@@ -3,10 +3,10 @@
   "schemes": {
     "p2id.vault.v1": {
       "identityDomain": "p2id.identity.v1",
-      "vaultInitCodeHash": "0xe77177c8928780958d3dd9349c9e58ed44081f738fb54dec4e46d043aad778d5",
+      "vaultInitCodeHash": "0x5473d8d97be4ce19602ca8c81568811e3c909673002ce551c11db418c5d5534d",
       "factories": {
         "production": null,
-        "sandbox": null
+        "sandbox": "0xAECf3f3bce42eD32f5FCA722537fd6094527aD96"
       },
       "compiler": {
         "solc": "0.8.28",

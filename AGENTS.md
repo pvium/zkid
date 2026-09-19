@@ -24,7 +24,7 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
 | Folder | Contents |
 | --- | --- |
 | `circuit/` | Noir circuit (`src/`), witness generator (`scripts/`), e2e test + sample token/keys (`test/`) |
-| `contracts/` | Hardhat 2 + ethers v6 project: generated Honk verifier, `PviumIdentity` (dev API), `P2IDVault` + `PviumVerifier`; `src/interfaces/`, `src/lib/PviumHash.sol` |
+| `contracts/` | Hardhat 2 + ethers v6 project: generated Honk verifier, `PviumIdentity` (dev API), `P2IDVault` + `PviumVerifier`; `src/interfaces/`, `src/lib/P2IDHash.sol` |
 | `sdks/node/` | npm package `@pvium/zk-verifier` (bb.js verifier + claim decoding). `sdks/python`, `sdks/go` later |
 | `http-prover/` | Attestation service (Express 5, `--env-file=.env`, noir_js solve, native `bb` prove). `yarn sync` copies circuit artifacts |
 
@@ -46,11 +46,11 @@ Install with `yarn install`, run scripts with `yarn <script>`, run binaries with
   diffs their output byte for byte. Change both together. `@noir-lang/noir_js` in `http-prover/` is pinned
   to the nargo version (`1.0.0-beta.22`).
 - Hash/normalisation rules must stay identical in four places: `circuit/src/main.nr` + `identity.nr`,
-  `circuit/scripts/gen_prover.py`, `contracts/src/lib/PviumHash.sol`, `sdks/node/src/identity.ts`.
+  `circuit/scripts/gen_prover.py`, `contracts/src/lib/P2IDHash.sol`, `sdks/node/src/identity.ts`.
 - `@aztec/bb.js` in `sdks/node` must be pinned to the same version as the installed `bb`
   (`5.0.0-nightly.20260522`): proofs and vks are not portable across versions.
 - `P2ID.md` at the repo root is the protocol spec (address formula, identity type ids). The type
-  table is append-only: never reassign or reuse an id; keep identity.nr, PviumHash.sol, the SDK
+  table is append-only: never reassign or reuse an id; keep identity.nr, P2IDHash.sol, the SDK
   and the prover in step and update P2ID.md with them.
 - The identity-hash domain prefix is `p2id.identity.v1`. Prefixes are dot-separated
   (`p2id.<component>.vN`).

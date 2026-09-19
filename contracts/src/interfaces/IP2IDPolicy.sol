@@ -28,10 +28,12 @@ interface IP2IDPolicy {
     ///         deposit is made (and fixed for it), or at sweep time for untracked funds.
     function feeBps(address verifier, address token) external view returns (uint16);
 
-    /// @notice Called by a vault holding fees earned through `verifier`, after approving this
-    ///         policy for exactly `amount` of `token`. Pull the tokens (transferFrom the caller)
-    ///         and distribute them. Whatever is not pulled stays accrued in the vault; the
-    ///         allowance is reset afterwards. Pulling from msg.sender makes the amount
+    /// @notice Called by a vault holding fees earned through `verifier`. For an ERC-20 the vault
+    ///         first approves this policy for exactly `amount`: pull the tokens (transferFrom the
+    ///         caller) and distribute them; whatever is not pulled stays accrued in the vault, and
+    ///         the allowance is reset afterwards. Pulling from msg.sender makes the amount
     ///         self-verifying: a caller that is not a vault can only give away its own tokens.
-    function distributeFee(address verifier, address token, uint256 amount) external;
+    ///         For the native coin (token == address(0)) the vault sends `amount` as msg.value
+    ///         instead, and all of it counts as distributed.
+    function distributeFee(address verifier, address token, uint256 amount) external payable;
 }
